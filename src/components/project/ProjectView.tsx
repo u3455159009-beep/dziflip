@@ -12,6 +12,10 @@ import { ComparablesTable } from "./ComparablesTable";
 import { EconomicsSection } from "./EconomicsSection";
 import { PhotosGallery } from "./PhotosGallery";
 import { BudgetSection } from "./BudgetSection";
+import { PriceDropWatch } from "./PriceDropWatch";
+import { ContactOutreach } from "./ContactOutreach";
+import { DataConfidencePanel } from "./DataConfidencePanel";
+import type { FieldMeta } from "@/lib/types";
 
 export function ProjectView({ project }: { project: ProjectDTO }) {
   const searchParams = useSearchParams();
@@ -44,7 +48,14 @@ export function ProjectView({ project }: { project: ProjectDTO }) {
         </Link>
         <div className="mt-2 flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h1 className="font-serif text-3xl text-ink">{project.title || "Nepojmenovaná nemovitost"}</h1>
+            <div className="flex items-center gap-2">
+              <h1 className="font-serif text-3xl text-ink">{project.title || "Nepojmenovaná nemovitost"}</h1>
+              {project.isDemo && (
+                <span className="rounded-full bg-ink/80 px-2.5 py-1 text-[10px] font-medium uppercase text-paper">
+                  DEMO
+                </span>
+              )}
+            </div>
             <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted">
               {project.portal && <span>{project.portal}</span>}
               {project.municipality && <span>· {project.municipality}</span>}
@@ -55,6 +66,7 @@ export function ProjectView({ project }: { project: ProjectDTO }) {
                 </a>
               )}
               <span>· založeno {formatDate(project.createdAt)}</span>
+              {project.sourceWatcher && <span>· nalezeno hlídačem "{project.sourceWatcher.name}"</span>}
             </div>
           </div>
           <Select value={status} onChange={(e) => updateStatus(e.target.value)} className="w-48">
@@ -94,7 +106,17 @@ export function ProjectView({ project }: { project: ProjectDTO }) {
 
       <ListingFields project={project} />
 
+      <DataConfidencePanel
+        fieldMeta={(project.fieldMeta ? JSON.parse(project.fieldMeta) : {}) as FieldMeta}
+        comparablesCount={project.comparables.length}
+        hasRealBudgetItems={project.budgetItems.length > 0}
+        renovationCostSet={Boolean(project.assumptions?.renovationCost && project.assumptions.renovationCost > 0)}
+        salePriceSet={Boolean(project.assumptions?.saleBase)}
+      />
+
       <ComparablesTable projectId={project.id} comparables={project.comparables} />
+
+      <PriceDropWatch projectId={project.id} history={project.priceHistory} />
 
       <EconomicsSection
         projectId={project.id}
@@ -107,6 +129,8 @@ export function ProjectView({ project }: { project: ProjectDTO }) {
       <PhotosGallery projectId={project.id} photos={project.photos} />
 
       <BudgetSection projectId={project.id} items={project.budgetItems} />
+
+      <ContactOutreach projectId={project.id} contact={project.contact} messages={project.outreachMessages} />
 
       {project.fullText && (
         <Card>

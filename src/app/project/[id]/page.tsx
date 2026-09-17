@@ -11,7 +11,11 @@ export default async function ProjectPage({ params }: { params: { id: string } }
       photos: { orderBy: { sortOrder: "asc" } },
       comparables: { orderBy: { foundAt: "desc" } },
       budgetItems: { orderBy: [{ room: "asc" }, { sortOrder: "asc" }] },
-      assumptions: true
+      assumptions: true,
+      priceHistory: { orderBy: { recordedAt: "asc" } },
+      contact: true,
+      outreachMessages: { orderBy: { createdAt: "desc" } },
+      sourceWatcher: { select: { id: true, name: true } }
     }
   });
 

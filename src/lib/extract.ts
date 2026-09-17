@@ -299,3 +299,26 @@ function resolveUrl(src: string, base: string): string {
     return src;
   }
 }
+
+export interface ExtractedContact {
+  phone?: string;
+  email?: string;
+}
+
+const CZ_PHONE_RE = /(?:\+420[\s\-]?)?\b(\d{3}[\s\-]?\d{3}[\s\-]?\d{3})\b/;
+const EMAIL_RE = /\b[\w.+-]+@[\w-]+\.[\w.-]+\b/;
+
+/**
+ * Only returns contact details literally present in the listing text —
+ * never guessed or looked up. Most portals hide the agent's phone behind a
+ * JS "show number" button, so this often finds nothing, which is correct:
+ * the caller must leave the field UNKNOWN rather than invent it.
+ */
+export function extractContactInfo(text: string): ExtractedContact {
+  const contact: ExtractedContact = {};
+  const phoneMatch = text.match(CZ_PHONE_RE);
+  if (phoneMatch) contact.phone = phoneMatch[0].trim();
+  const emailMatch = text.match(EMAIL_RE);
+  if (emailMatch) contact.email = emailMatch[0].trim();
+  return contact;
+}

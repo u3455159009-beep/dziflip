@@ -1,13 +1,24 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import "./globals.css";
+import { prisma } from "@/lib/prisma";
 
 export const metadata: Metadata = {
   title: "dziflip — analýza flipů nemovitostí",
   description: "Osobní nástroj pro analýzu a plánování flipů nemovitostí v ČR"
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+async function getUnreadAlertCount(): Promise<number> {
+  try {
+    return await prisma.alert.count({ where: { readAt: null } });
+  } catch {
+    return 0;
+  }
+}
+
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const unreadAlerts = await getUnreadAlertCount();
+
   return (
     <html lang="cs">
       <body className="min-h-screen bg-paper font-sans antialiased">
@@ -16,15 +27,32 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <Link href="/" className="font-serif text-xl tracking-tight text-ink">
               dzi<span className="text-beige-500">flip</span>
             </Link>
-            <nav className="flex items-center gap-6 text-sm text-muted">
+            <nav className="flex items-center gap-5 text-sm text-muted">
               <Link href="/" className="hover:text-ink transition-colors">
                 Nová analýza
+              </Link>
+              <Link href="/feed" className="hover:text-ink transition-colors">
+                Deal Feed
+              </Link>
+              <Link href="/radar" className="hover:text-ink transition-colors">
+                Deal Radar
+              </Link>
+              <Link href="/alerts" className="relative hover:text-ink transition-colors">
+                Alerty
+                {unreadAlerts > 0 && (
+                  <span className="absolute -right-3 -top-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-band-bad px-1 text-[10px] font-medium text-white">
+                    {unreadAlerts}
+                  </span>
+                )}
               </Link>
               <Link href="/projects" className="hover:text-ink transition-colors">
                 Projekty
               </Link>
               <Link href="/compare" className="hover:text-ink transition-colors">
                 Porovnání
+              </Link>
+              <Link href="/settings" className="hover:text-ink transition-colors">
+                Nastavení
               </Link>
             </nav>
           </div>

@@ -154,3 +154,89 @@ export const BUDGET_TIER_LABELS: Record<BudgetTier, string> = {
   RECOMMENDED: "Doporučená varianta",
   PREMIUM: "Premium varianta"
 };
+
+// --- Phase 2: Deal Radar, Alerts, Contact automation ---
+
+export const CONTACT_STATUSES = [
+  "NEKONTAKTOVANO",
+  "ZPRAVA_PRIPRAVENA",
+  "ODESLANO",
+  "ODPOVEDEL",
+  "PROHLIDKA",
+  "JEDNANI",
+  "ODMITNUTO"
+] as const;
+export type ContactStatus = (typeof CONTACT_STATUSES)[number];
+
+export const CONTACT_STATUS_LABELS: Record<ContactStatus, string> = {
+  NEKONTAKTOVANO: "Nekontaktováno",
+  ZPRAVA_PRIPRAVENA: "Zpráva připravena",
+  ODESLANO: "Odesláno",
+  ODPOVEDEL: "Odpověděl",
+  PROHLIDKA: "Prohlídka",
+  JEDNANI: "Jednání",
+  ODMITNUTO: "Odmítnuto"
+};
+
+export const CONTACT_AUTOMATION_MODES = ["OFF", "DRAFT", "AUTO"] as const;
+export type ContactAutomationMode = (typeof CONTACT_AUTOMATION_MODES)[number];
+
+export const CONTACT_AUTOMATION_MODE_LABELS: Record<ContactAutomationMode, string> = {
+  OFF: "Vypnuto",
+  DRAFT: "Návrh ke schválení",
+  AUTO: "Automaticky"
+};
+
+export const OUTREACH_STATUSES = [
+  "DRAFT",
+  "SENT",
+  "BLOCKED_NO_PROVIDER",
+  "BLOCKED_RULES",
+  "FAILED",
+  "RECEIVED"
+] as const;
+export type OutreachStatus = (typeof OUTREACH_STATUSES)[number];
+
+export const OUTREACH_STATUS_LABELS: Record<OutreachStatus, string> = {
+  DRAFT: "Návrh",
+  SENT: "Odesláno",
+  BLOCKED_NO_PROVIDER: "Blokováno — e-mail nenakonfigurován",
+  BLOCKED_RULES: "Blokováno pravidly",
+  FAILED: "Selhalo",
+  RECEIVED: "Přijato"
+};
+
+export const NOTIFICATION_CHANNELS = ["IN_APP", "EMAIL", "PUSH", "SMS"] as const;
+export type NotificationChannel = (typeof NOTIFICATION_CHANNELS)[number];
+
+export const NOTIFICATION_CHANNEL_LABELS: Record<NotificationChannel, string> = {
+  IN_APP: "V aplikaci",
+  EMAIL: "E-mail",
+  PUSH: "Push / mobil",
+  SMS: "SMS"
+};
+
+export const ALERT_REASONS = ["NEW_MATCH", "PRICE_DROP"] as const;
+export type AlertReason = (typeof ALERT_REASONS)[number];
+
+export const ALERT_REASON_LABELS: Record<AlertReason, string> = {
+  NEW_MATCH: "Nová shoda",
+  PRICE_DROP: "Snížení ceny"
+};
+
+export const DATA_CONFIDENCE_LEVELS = ["HIGH", "MEDIUM", "LOW"] as const;
+export type DataConfidenceLevel = (typeof DATA_CONFIDENCE_LEVELS)[number];
+
+export const DATA_CONFIDENCE_LABELS: Record<DataConfidenceLevel, string> = {
+  HIGH: "HIGH",
+  MEDIUM: "MEDIUM",
+  LOW: "LOW"
+};
+
+export const OWNERSHIP_FILTERS = ["OSOBNI", "DRUZSTEVNI"] as const;
+export type OwnershipFilter = (typeof OWNERSHIP_FILTERS)[number];
+
+export const OWNERSHIP_FILTER_LABELS: Record<OwnershipFilter, string> = {
+  OSOBNI: "Osobní",
+  DRUZSTEVNI: "Družstevní"
+};

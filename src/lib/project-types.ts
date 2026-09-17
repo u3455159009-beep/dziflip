@@ -67,6 +67,40 @@ export interface AssumptionsDTO {
   updatedAt: string;
 }
 
+export interface PriceHistoryDTO {
+  id: string;
+  projectId: string;
+  price: number;
+  recordedAt: string;
+  source: string;
+}
+
+export interface ContactDTO {
+  id: string;
+  projectId: string;
+  name: string | null;
+  phone: string | null;
+  email: string | null;
+  agency: string | null;
+  lastContactedAt: string | null;
+  status: string;
+  updatedAt: string;
+}
+
+export interface OutreachMessageDTO {
+  id: string;
+  projectId: string;
+  direction: string;
+  mode: string | null;
+  channel: string;
+  subject: string | null;
+  body: string;
+  status: string;
+  blockedReason: string | null;
+  createdAt: string;
+  sentAt: string | null;
+}
+
 export interface ProjectDTO {
   id: string;
   status: string;
@@ -102,8 +136,15 @@ export interface ProjectDTO {
   fullText: string | null;
   fieldMeta: string | null;
   targetPrice: number | null;
+  externalId: string | null;
+  isDemo: boolean;
+  sourceWatcherId: string | null;
+  sourceWatcher: { id: string; name: string } | null;
   photos: PhotoDTO[];
   comparables: ComparableDTO[];
   budgetItems: BudgetItemDTO[];
   assumptions: AssumptionsDTO | null;
+  priceHistory: PriceHistoryDTO[];
+  contact: ContactDTO | null;
+  outreachMessages: OutreachMessageDTO[];
 }

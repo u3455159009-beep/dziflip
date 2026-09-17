@@ -47,14 +47,21 @@ export default async function ProjectsPage() {
                         href={`/project/${p.id}`}
                         className="block overflow-hidden rounded-xl2 border border-line bg-card shadow-card transition-shadow hover:shadow-soft"
                       >
-                        {p.photos[0] ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={p.photos[0].url} alt="" className="h-36 w-full object-cover" />
-                        ) : (
-                          <div className="flex h-36 w-full items-center justify-center bg-beige-100 text-xs text-muted">
-                            Bez fotografie
-                          </div>
-                        )}
+                        <div className="relative">
+                          {p.photos[0] ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={p.photos[0].url} alt="" className="h-36 w-full object-cover" />
+                          ) : (
+                            <div className="flex h-36 w-full items-center justify-center bg-beige-100 text-xs text-muted">
+                              Bez fotografie
+                            </div>
+                          )}
+                          {p.isDemo && (
+                            <span className="absolute left-2 top-2 rounded-full bg-ink/80 px-2 py-0.5 text-[10px] font-medium uppercase text-paper">
+                              DEMO
+                            </span>
+                          )}
+                        </div>
                         <div className="p-4">
                           <div className="truncate font-medium text-ink">{p.title || "Nepojmenovaná nemovitost"}</div>
                           <div className="mt-0.5 truncate text-xs text-muted">

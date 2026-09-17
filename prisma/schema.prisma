@@ -12,6 +12,12 @@ datasource db {
 // PriceType: ASKING | ESTIMATE | REALIZED
 // DataConfidence: VERIFIED | ESTIMATED | UNKNOWN
 // PriceSource: EXACT | ESTIMATE | MANUAL
+// ContactStatus: NEKONTAKTOVANO | ZPRAVA_PRIPRAVENA | ODESLANO | ODPOVEDEL | PROHLIDKA | JEDNANI | ODMITNUTO
+// ContactAutomationMode: OFF | DRAFT | AUTO
+// OutreachStatus: DRAFT | SENT | BLOCKED_NO_PROVIDER | BLOCKED_RULES | FAILED | RECEIVED
+// NotificationChannel: IN_APP | EMAIL | PUSH | SMS
+// NotificationStatus: SENT | NOT_CONFIGURED | FAILED | QUEUED
+// SourceProviderStatus: ACTIVE | PENDING_ACCESS
 
 model Project {
   id        String   @id @default(cuid())
@@ -57,10 +63,174 @@ model Project {
   // My own targets
   targetPrice Float?
 
-  photos      Photo[]
-  comparables Comparable[]
-  budgetItems BudgetItem[]
-  assumptions Assumptions?
+  // Deal Radar / dedup
+  externalId      String? // stable id from a source provider, used for dedup
+  isDemo          Boolean  @default(false) // true when created from the MOCK_DEMO provider — never real data
+  sourceWatcherId String?
+  sourceWatcher   Watcher? @relation(fields: [sourceWatcherId], references: [id], onDelete: SetNull)
+
+  photos           Photo[]
+  comparables      Comparable[]
+  budgetItems      BudgetItem[]
+  assumptions      Assumptions?
+  priceHistory     PriceHistory[]
+  contact          Contact?
+  outreachMessages OutreachMessage[]
+  alerts           Alert[]
+
+  @@unique([portal, externalId])
+}
+
+model PriceHistory {
+  id         String   @id @default(cuid())
+  projectId  String
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  price      Float
+  recordedAt DateTime @default(now())
+  source     String   @default("MANUAL") // MANUAL | WATCHER | SEED
+}
+
+model Contact {
+  id              String    @id @default(cuid())
+  projectId       String    @unique
+  project         Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name            String?
+  phone           String?
+  email           String?
+  agency          String?
+  lastContactedAt DateTime?
+  status          String    @default("NEKONTAKTOVANO")
+  updatedAt       DateTime  @updatedAt
+}
+
+model OutreachMessage {
+  id            String    @id @default(cuid())
+  projectId     String
+  project       Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  direction     String // OUTBOUND | INBOUND
+  mode          String? // DRAFT | AUTO — for outbound messages only
+  channel       String    @default("EMAIL")
+  subject       String?
+  body          String
+  status        String // DRAFT | SENT | BLOCKED_NO_PROVIDER | BLOCKED_RULES | FAILED | RECEIVED
+  blockedReason String?
+  createdAt     DateTime  @default(now())
+  sentAt        DateTime?
+}
+
+model MessageTemplate {
+  id        String   @id @default(cuid())
+  name      String
+  body      String
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Watcher {
+  id     String  @id @default(cuid())
+  name   String
+  active Boolean @default(true)
+
+  municipality   String?
+  district       String?
+  dispositions   String? // comma-separated, e.g. "2+1,2+kk"
+  minAreaM2      Float?
+  maxAreaM2      Float?
+  maxAskingPrice Float?
+  maxPricePerM2  Float?
+  condition      String?
+  ownership      String? // OSOBNI | DRUZSTEVNI | null = any
+
+  minProfit             Float?
+  minRoiPct             Float?
+  maxRenovationEstimate Float?
+  requiredReserve       Float?
+
+  onlyNewListings   Boolean @default(false)
+  trackPriceChanges Boolean @default(true)
+
+  sources String @default("MOCK_DEMO") // comma-separated provider keys
+
+  lastRunAt   DateTime?
+  lastRunNote String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  projects Project[]
+  alerts   Alert[]
+}
+
+model Alert {
+  id        String   @id @default(cuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  watcherId String?
+  watcher   Watcher? @relation(fields: [watcherId], references: [id], onDelete: SetNull)
+
+  reason         String // NEW_MATCH | PRICE_DROP
+  band           String?
+  askingPrice    Float?
+  pricePerM2     Float?
+  expectedProfit Float?
+  roiPct         Float?
+
+  createdAt DateTime  @default(now())
+  readAt    DateTime?
+
+  notifications NotificationLog[]
+}
+
+model NotificationLog {
+  id        String   @id @default(cuid())
+  alertId   String?
+  alert     Alert?   @relation(fields: [alertId], references: [id], onDelete: Cascade)
+  channel   String // IN_APP | EMAIL | PUSH | SMS
+  status    String // SENT | NOT_CONFIGURED | FAILED | QUEUED
+  detail    String?
+  createdAt DateTime @default(now())
+}
+
+model Settings {
+  id String @id @default("singleton")
+
+  defaultMinProfit           Float?
+  defaultMinRoiPct           Float?
+  defaultReserve             Float?
+  defaultRenovationCostPerM2 Float?
+  preferredLocalities        String? // JSON array of strings
+
+  notifyInApp        Boolean @default(true)
+  notifyEmail        Boolean @default(false)
+  notifyEmailAddress String?
+
+  contactAutomationMode        String    @default("DRAFT") // OFF | DRAFT | AUTO
+  contactAutomationConfirmedAt DateTime?
+  dailyContactLimit            Int       @default(5)
+  defaultTemplateId            String?
+
+  updatedAt DateTime @updatedAt
+}
+
+// Self-contained DEMO fixture data used only by the MOCK_DEMO source provider.
+// Never presented as real market data — always tagged isDemo/portal "DEMO" downstream.
+model DemoListing {
+  id           String   @id @default(cuid())
+  externalId   String   @unique
+  portal       String   @default("DEMO")
+  title        String
+  municipality String
+  district     String?
+  disposition  String
+  areaM2       Float
+  price        Float
+  basePrice    Float
+  condition    String
+  ownership    String
+  url          String
+  photos       String // JSON array of urls
+  publishedAt  DateTime
 }
 
 model Photo {
@@ -75,28 +245,28 @@ model Photo {
 }
 
 model Comparable {
-  id           String      @id @default(cuid())
-  projectId    String
-  project      Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  title        String?
-  url          String?
-  portal       String?
-  locality     String?
-  disposition  String?
-  areaM2       Float?
-  price        Float?
-  pricePerM2   Float?
-  condition    String?
-  distanceKm   Float?
-  priceType    String      @default("ASKING")
-  foundAt      DateTime    @default(now())
-  createdAt    DateTime    @default(now())
+  id          String   @id @default(cuid())
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  title       String?
+  url         String?
+  portal      String?
+  locality    String?
+  disposition String?
+  areaM2      Float?
+  price       Float?
+  pricePerM2  Float?
+  condition   String?
+  distanceKm  Float?
+  priceType   String   @default("ASKING")
+  foundAt     DateTime @default(now())
+  createdAt   DateTime @default(now())
 }
 
 model BudgetItem {
-  id               String      @id @default(cuid())
+  id               String    @id @default(cuid())
   projectId        String
-  project          Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project          Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
   room             String?
   category         String
   name             String
@@ -106,12 +276,12 @@ model BudgetItem {
   laborEstimate    Float?
   materialEstimate Float?
   total            Float?
-  priceSource      String      @default("ESTIMATE")
+  priceSource      String    @default("ESTIMATE")
   productUrl       String?
   shop             String?
   verifiedAt       DateTime?
-  createdAt        DateTime    @default(now())
-  sortOrder        Int         @default(0)
+  createdAt        DateTime  @default(now())
+  sortOrder        Int       @default(0)
 }
 
 model Assumptions {
@@ -125,14 +295,14 @@ model Assumptions {
   saleBase         Float?
   saleOptimistic   Float?
 
-  renovationCost   Float?
-  furnishingCost   Float?
-  legalCosts       Float?
-  financingCost    Float?
-  otherCosts       Float?
-  reserve          Float?
+  renovationCost Float?
+  furnishingCost Float?
+  legalCosts     Float?
+  financingCost  Float?
+  otherCosts     Float?
+  reserve        Float?
 
-  minProfit   Float?
+  minProfit    Float?
   minMarginPct Float? // 0-1
   minRoiPct    Float? // 0-1
 
