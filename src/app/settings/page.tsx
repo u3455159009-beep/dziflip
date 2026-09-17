@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { getSettings } from "@/lib/settings";
 import { getDefaultTemplate } from "@/lib/outreach";
+import { getDefaultSmsTemplate } from "@/lib/smsHub";
 import { SettingsManager } from "@/components/settings/SettingsManager";
 
 export const dynamic = "force-dynamic";
@@ -8,6 +9,7 @@ export const dynamic = "force-dynamic";
 export default async function SettingsPage() {
   const settings = await getSettings();
   await getDefaultTemplate();
+  await getDefaultSmsTemplate();
   const templates = await prisma.messageTemplate.findMany({ orderBy: { createdAt: "asc" } });
 
   return (

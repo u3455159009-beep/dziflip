@@ -15,6 +15,7 @@ import { BudgetSection } from "./BudgetSection";
 import { PriceDropWatch } from "./PriceDropWatch";
 import { ContactOutreach } from "./ContactOutreach";
 import { DataConfidencePanel } from "./DataConfidencePanel";
+import { SmsConversation } from "./SmsConversation";
 import type { FieldMeta } from "@/lib/types";
 
 export function ProjectView({ project }: { project: ProjectDTO }) {
@@ -131,6 +132,8 @@ export function ProjectView({ project }: { project: ProjectDTO }) {
       <BudgetSection projectId={project.id} items={project.budgetItems} />
 
       <ContactOutreach projectId={project.id} contact={project.contact} messages={project.outreachMessages} />
+
+      <SmsConversation projectId={project.id} contact={project.contact} messages={project.smsMessages} />
 
       {project.fullText && (
         <Card>

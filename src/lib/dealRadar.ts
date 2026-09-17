@@ -11,6 +11,7 @@ import { computeBands, computeComparableStats, computeEconomics, classifyPrice, 
 import { dispatchAlert } from "@/lib/notifications/dispatcher";
 import { computeDataConfidence } from "@/lib/confidence";
 import { maybeSendAutoOutreach } from "@/lib/outreach";
+import { maybeSendAutoSms } from "@/lib/smsHub";
 import type { FieldMeta } from "@/lib/types";
 
 const OWNERSHIP_LABEL: Record<string, string> = {
@@ -336,4 +337,5 @@ async function maybeAlertAndOutreach(args: {
   });
 
   await maybeSendAutoOutreach(project.id, confidence.level);
+  await maybeSendAutoSms(project.id);
 }

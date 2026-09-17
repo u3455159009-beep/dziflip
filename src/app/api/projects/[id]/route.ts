@@ -13,7 +13,8 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
       priceHistory: { orderBy: { recordedAt: "asc" } },
       contact: true,
       outreachMessages: { orderBy: { createdAt: "desc" } },
-      sourceWatcher: { select: { id: true, name: true } }
+      sourceWatcher: { select: { id: true, name: true } },
+      smsMessages: { orderBy: { createdAt: "asc" } }
     }
   });
   if (!project) return NextResponse.json({ error: "Nenalezeno" }, { status: 404 });

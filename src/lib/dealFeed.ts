@@ -11,7 +11,7 @@ import {
   type FlipBand
 } from "./calc";
 import { computeDataConfidence, type ConfidenceBreakdownItem } from "./confidence";
-import type { FieldMeta, DataConfidenceLevel } from "./types";
+import type { FieldMeta, DataConfidenceLevel, SmsFeedStatus } from "./types";
 
 export interface DealFeedItem {
   id: string;
@@ -33,6 +33,7 @@ export interface DealFeedItem {
   roiPct: number | null;
   band: FlipBand | null;
   dataConfidenceLevel: DataConfidenceLevel;
+  smsStatus: SmsFeedStatus;
   why: {
     purchasePrice: number | null;
     totalInvestment: number | null;
@@ -71,6 +72,18 @@ export interface ProjectForFeed {
   comparables: { pricePerM2: number | null }[];
   budgetItems: { id: string }[];
   assumptions: AssumptionsInput | null;
+  smsMessages: { status: string; direction: string; classification: string | null }[];
+}
+
+function computeSmsStatus(messages: ProjectForFeed["smsMessages"]): SmsFeedStatus {
+  const inbound = messages.filter((m) => m.direction === "INBOUND");
+  if (inbound.some((m) => m.classification === "NABIZI_PROHLIDKU")) return "PROHLIDKA_NAVRZENA";
+  if (inbound.length > 0) return "MAKLER_ODPOVEDEL";
+  if (messages.some((m) => m.direction === "OUTBOUND" && ["QUEUED", "SENT", "DELIVERED"].includes(m.status))) {
+    return "SMS_ODESLANA";
+  }
+  if (messages.some((m) => m.direction === "OUTBOUND" && m.status === "DRAFT")) return "SMS_DRAFT";
+  return "SMS_NEODESLANA";
 }
 
 export function buildDealFeedItem(project: ProjectForFeed): DealFeedItem {
@@ -133,6 +146,7 @@ export function buildDealFeedItem(project: ProjectForFeed): DealFeedItem {
     roiPct,
     band,
     dataConfidenceLevel: confidence.level,
+    smsStatus: computeSmsStatus(project.smsMessages),
     why: {
       purchasePrice,
       totalInvestment,

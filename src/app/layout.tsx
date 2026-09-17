@@ -16,8 +16,20 @@ async function getUnreadAlertCount(): Promise<number> {
   }
 }
 
+async function getUnreadSmsCount(): Promise<number> {
+  try {
+    const [unreadAssigned, unassigned] = await Promise.all([
+      prisma.smsMessage.count({ where: { direction: "INBOUND", readAt: null, projectId: { not: null } } }),
+      prisma.smsMessage.count({ where: { projectId: null } })
+    ]);
+    return unreadAssigned + unassigned;
+  } catch {
+    return 0;
+  }
+}
+
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const unreadAlerts = await getUnreadAlertCount();
+  const [unreadAlerts, unreadSms] = await Promise.all([getUnreadAlertCount(), getUnreadSmsCount()]);
 
   return (
     <html lang="cs">
@@ -42,6 +54,14 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                 {unreadAlerts > 0 && (
                   <span className="absolute -right-3 -top-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-band-bad px-1 text-[10px] font-medium text-white">
                     {unreadAlerts}
+                  </span>
+                )}
+              </Link>
+              <Link href="/messages" className="relative hover:text-ink transition-colors">
+                Zprávy
+                {unreadSms > 0 && (
+                  <span className="absolute -right-3 -top-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-band-bad px-1 text-[10px] font-medium text-white">
+                    {unreadSms}
                   </span>
                 )}
               </Link>

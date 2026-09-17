@@ -18,6 +18,13 @@ datasource db {
 // NotificationChannel: IN_APP | EMAIL | PUSH | SMS
 // NotificationStatus: SENT | NOT_CONFIGURED | FAILED | QUEUED
 // SourceProviderStatus: ACTIVE | PENDING_ACCESS
+// SmsDirection: OUTBOUND | INBOUND
+// SmsKind: INTRO | REPLY
+// SmsStatus: DRAFT | QUEUED | SENT | DELIVERED | FAILED | RECEIVED
+// SmsProviderKey: MOCK_SMS | REAL_SMS
+// SmsClassification: NABIZI_PROHLIDKU | CHCE_ZAVOLAT | NEMOVITOST_PRODANA | NEMA_ZAJEM | CHCE_DALSI_INFORMACE | JINE | UNKNOWN
+// SmsAutomationMode: OFF | DRAFT | AUTO
+// MessageTemplateChannel: EMAIL | SMS
 
 model Project {
   id        String   @id @default(cuid())
@@ -77,6 +84,8 @@ model Project {
   contact          Contact?
   outreachMessages OutreachMessage[]
   alerts           Alert[]
+  smsMessages      SmsMessage[]
+  smsAuditLogs     SmsAuditLog[]
 
   @@unique([portal, externalId])
 }
@@ -101,6 +110,8 @@ model Contact {
   lastContactedAt DateTime?
   status          String    @default("NEKONTAKTOVANO")
   updatedAt       DateTime  @updatedAt
+
+  smsMessages SmsMessage[]
 }
 
 model OutreachMessage {
@@ -122,6 +133,7 @@ model MessageTemplate {
   id        String   @id @default(cuid())
   name      String
   body      String
+  channel   String   @default("EMAIL") // EMAIL | SMS
   isDefault Boolean  @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -210,7 +222,66 @@ model Settings {
   dailyContactLimit            Int       @default(5)
   defaultTemplateId            String?
 
+  smsAutomationMode        String    @default("DRAFT") // OFF | DRAFT | AUTO
+  smsAutomationConfirmedAt DateTime?
+  maxAutoSmsPerDay         Int       @default(3)
+  smsAutoReplyEnabled      Boolean   @default(false)
+  defaultSmsTemplateId     String?
+
   updatedAt DateTime @updatedAt
+}
+
+model SmsMessage {
+  id        String   @id @default(cuid())
+  projectId String?
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  contactId String?
+  contact   Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  direction String // OUTBOUND | INBOUND
+  kind      String  @default("INTRO") // INTRO | REPLY
+  mode      String? // DRAFT | AUTO — outbound only
+  phone     String // counterparty's phone number (normalized)
+  body      String
+  status    String // DRAFT | QUEUED | SENT | DELIVERED | FAILED | RECEIVED
+  provider  String  @default("MOCK_SMS") // MOCK_SMS | REAL_SMS
+  isDemo    Boolean @default(false)
+
+  providerMessageId String?
+  blockedReason     String?
+
+  classification       String? // inbound only — UNKNOWN unless a deterministic rule matched
+  suggestedDateTimeRaw String?
+  suggestedDateTime    DateTime?
+
+  readAt DateTime? // inbound: has the user seen it in the inbox
+
+  createdAt   DateTime  @default(now())
+  queuedAt    DateTime?
+  sentAt      DateTime?
+  deliveredAt DateTime?
+  failedAt    DateTime?
+}
+
+model SmsBlacklist {
+  id        String   @id @default(cuid())
+  phone     String   @unique
+  reason    String?
+  createdAt DateTime @default(now())
+}
+
+// Full audit trail of every SMS automation decision — including why a
+// message was NOT sent — per rule step (Deal Radar check, confidence,
+// dedup, daily limit, blacklist, mode).
+model SmsAuditLog {
+  id        String   @id @default(cuid())
+  projectId String?
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  phone     String?
+  step      String
+  result    String // PASS | FAIL | INFO
+  detail    String?
+  createdAt DateTime @default(now())
 }
 
 // Self-contained DEMO fixture data used only by the MOCK_DEMO source provider.

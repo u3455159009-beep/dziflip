@@ -1,8 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button, Card, Input, SectionTitle, Select, Textarea } from "@/components/ui";
-import { CONTACT_AUTOMATION_MODES, CONTACT_AUTOMATION_MODE_LABELS } from "@/lib/types";
+import {
+  CONTACT_AUTOMATION_MODES,
+  CONTACT_AUTOMATION_MODE_LABELS,
+  SMS_AUTOMATION_MODES,
+  SMS_AUTOMATION_MODE_LABELS
+} from "@/lib/types";
 import { formatDate } from "@/lib/format";
 
 export interface SettingsDTO {
@@ -17,13 +22,25 @@ export interface SettingsDTO {
   contactAutomationMode: string;
   contactAutomationConfirmedAt: string | null;
   dailyContactLimit: number;
+  smsAutomationMode: string;
+  smsAutomationConfirmedAt: string | null;
+  maxAutoSmsPerDay: number;
+  smsAutoReplyEnabled: boolean;
 }
 
 export interface TemplateDTO {
   id: string;
   name: string;
   body: string;
+  channel: string;
   isDefault: boolean;
+}
+
+interface BlacklistEntry {
+  id: string;
+  phone: string;
+  reason: string | null;
+  createdAt: string;
 }
 
 export function SettingsManager({
@@ -37,7 +54,19 @@ export function SettingsManager({
   const [templates, setTemplates] = useState(initialTemplates);
   const [pendingAutoConfirm, setPendingAutoConfirm] = useState(false);
   const [autoConfirmChecked, setAutoConfirmChecked] = useState(false);
+  const [pendingSmsAutoConfirm, setPendingSmsAutoConfirm] = useState(false);
+  const [smsAutoConfirmChecked, setSmsAutoConfirmChecked] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [blacklist, setBlacklist] = useState<BlacklistEntry[]>([]);
+  const [newBlacklistPhone, setNewBlacklistPhone] = useState("");
+  const [newBlacklistReason, setNewBlacklistReason] = useState("");
+
+  useEffect(() => {
+    fetch("/api/sms/blacklist")
+      .then((r) => r.json())
+      .then(setBlacklist)
+      .catch(() => {});
+  }, []);
 
   async function patchSettings(data: Record<string, any>) {
     setSaving(true);
@@ -81,6 +110,44 @@ export function SettingsManager({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ body })
     });
+  }
+
+  async function handleSmsModeChange(next: string) {
+    if (next === "AUTO" && settings.smsAutomationMode !== "AUTO") {
+      setPendingSmsAutoConfirm(true);
+      return;
+    }
+    setSettings((s) => ({ ...s, smsAutomationMode: next }));
+    await patchSettings({ smsAutomationMode: next });
+  }
+
+  async function confirmSmsAuto() {
+    const ok = await patchSettings({ smsAutomationMode: "AUTO", confirmSmsAuto: true });
+    if (ok) {
+      setSettings((s) => ({ ...s, smsAutomationMode: "AUTO" }));
+      setPendingSmsAutoConfirm(false);
+      setSmsAutoConfirmChecked(false);
+    }
+  }
+
+  async function addBlacklistEntry() {
+    if (!newBlacklistPhone.trim()) return;
+    const res = await fetch("/api/sms/blacklist", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ phone: newBlacklistPhone.trim(), reason: newBlacklistReason.trim() || undefined })
+    });
+    if (res.ok) {
+      const entry = await res.json();
+      setBlacklist((b) => [entry, ...b.filter((x) => x.phone !== entry.phone)]);
+      setNewBlacklistPhone("");
+      setNewBlacklistReason("");
+    }
+  }
+
+  async function removeBlacklistEntry(phone: string) {
+    setBlacklist((b) => b.filter((x) => x.phone !== phone));
+    await fetch(`/api/sms/blacklist/${encodeURIComponent(phone)}`, { method: "DELETE" });
   }
 
   return (
@@ -226,7 +293,109 @@ export function SettingsManager({
       </Card>
 
       <Card>
-        <SectionTitle subtitle="Výchozí šablona žádosti o prohlídku. Upravte text dle potřeby — placeholdery {{title}} a {{address}} se nahradí údaji o nemovitosti.">
+        <SectionTitle subtitle='Výchozí SMS režim je "Návrh ke schválení". SMS telefonním číslům NEIMPLEMENTUJEME hovory — pouze textové zprávy. AUTO smí odeslat pouze pokud nabídka splňuje Deal Radar kritéria, telefon je ze zdrojových dat, data confidence je HIGH, nabídka není DEMO, nejde o duplicitu, není vyčerpán denní limit a číslo není na blacklistu.'>
+          SMS automatizace
+        </SectionTitle>
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Select value={settings.smsAutomationMode} onChange={(e) => handleSmsModeChange(e.target.value)} label="Režim">
+            {SMS_AUTOMATION_MODES.map((m) => (
+              <option key={m} value={m}>
+                {SMS_AUTOMATION_MODE_LABELS[m]}
+              </option>
+            ))}
+          </Select>
+          <Input
+            label="Max. automatických SMS / den"
+            type="number"
+            defaultValue={settings.maxAutoSmsPerDay}
+            onBlur={(e) => patchSettings({ maxAutoSmsPerDay: e.target.value || 3 })}
+          />
+        </div>
+
+        <label className="mt-4 flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={settings.smsAutoReplyEnabled}
+            onChange={(e) => {
+              setSettings((s) => ({ ...s, smsAutoReplyEnabled: e.target.checked }));
+              patchSettings({ smsAutoReplyEnabled: e.target.checked });
+            }}
+          />
+          Povolit automatické odpovědi na příchozí SMS
+        </label>
+        <p className="mt-1 text-xs text-muted">
+          Výchozí = vypnuto. I při zapnutí aplikace nikdy sama nepotvrzuje termín prohlídky — odpověď si vždy
+          nejprve připravíte tlačítkem a teprve poté schválíte k odeslání.
+        </p>
+
+        {settings.smsAutomationMode === "AUTO" && settings.smsAutomationConfirmedAt && (
+          <p className="mt-3 text-xs text-muted">
+            AUTO potvrzeno {formatDate(settings.smsAutomationConfirmedAt)}. Kdykoliv jej můžete okamžitě vypnout
+            výběrem jiného režimu výše.
+          </p>
+        )}
+
+        {pendingSmsAutoConfirm && (
+          <div className="mt-4 rounded-lg border border-band-bad/40 bg-band-badBg p-4">
+            <p className="text-sm font-medium text-band-bad">Potvrzení před zapnutím SMS AUTO</p>
+            <p className="mt-1 text-xs text-band-bad">
+              V režimu AUTO může aplikace sama odeslat SMS makléři/prodávajícímu bez vašeho schválení jednotlivé
+              zprávy — pouze pokud nemovitost projde všemi bezpečnostními pravidly a je nakonfigurován skutečný SMS
+              provider. Bez SMS_API_URL/SMS_API_KEY/SMS_SENDER_ID se SMS pouze připraví, nikdy neodešle naslepo.
+            </p>
+            <label className="mt-3 flex items-center gap-2 text-sm text-band-bad">
+              <input
+                type="checkbox"
+                checked={smsAutoConfirmChecked}
+                onChange={(e) => setSmsAutoConfirmChecked(e.target.checked)}
+              />
+              Rozumím a přeji si SMS AUTO aktivovat.
+            </label>
+            <div className="mt-3 flex gap-2">
+              <Button onClick={confirmSmsAuto} disabled={!smsAutoConfirmChecked || saving}>
+                Potvrdit a aktivovat AUTO
+              </Button>
+              <Button variant="ghost" onClick={() => setPendingSmsAutoConfirm(false)}>
+                Zrušit
+              </Button>
+            </div>
+          </div>
+        )}
+      </Card>
+
+      <Card>
+        <SectionTitle subtitle="Telefonní čísla označená NEKONTAKTOVAT nikdy nedostanou automatickou ani ručně schválenou SMS z DziFlip.">
+          SMS blacklist (NEKONTAKTOVAT)
+        </SectionTitle>
+        <div className="mb-4 flex flex-wrap items-end gap-3">
+          <Input label="Telefon" value={newBlacklistPhone} onChange={(e) => setNewBlacklistPhone(e.target.value)} />
+          <Input label="Důvod (volitelné)" value={newBlacklistReason} onChange={(e) => setNewBlacklistReason(e.target.value)} />
+          <Button variant="secondary" onClick={addBlacklistEntry}>
+            + Přidat na blacklist
+          </Button>
+        </div>
+        {blacklist.length === 0 ? (
+          <p className="text-sm text-muted">Blacklist je prázdný.</p>
+        ) : (
+          <div className="space-y-1.5 text-sm">
+            {blacklist.map((entry) => (
+              <div key={entry.id} className="flex items-center justify-between border-b border-line/60 py-1.5">
+                <span className="number-tabular">
+                  {entry.phone}
+                  {entry.reason && <span className="ml-2 text-xs text-muted">{entry.reason}</span>}
+                </span>
+                <button onClick={() => removeBlacklistEntry(entry.phone)} className="text-xs text-muted hover:text-band-bad">
+                  odebrat
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      <Card>
+        <SectionTitle subtitle="Výchozí šablony pro e-mail a SMS. Upravte text dle potřeby — placeholdery {{title}} a {{address}} se nahradí údaji o nemovitosti (jen e-mail).">
           Šablony zpráv
         </SectionTitle>
         <div className="space-y-4">
@@ -234,9 +403,10 @@ export function SettingsManager({
             <div key={t.id}>
               <div className="mb-1.5 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted">
                 {t.name}
+                <span className="rounded-full bg-beige-100 px-2 py-0.5 text-[10px]">{t.channel}</span>
                 {t.isDefault && <span className="rounded-full bg-beige-100 px-2 py-0.5 text-[10px]">výchozí</span>}
               </div>
-              <Textarea defaultValue={t.body} rows={5} onBlur={(e) => saveTemplate(t.id, e.target.value)} />
+              <Textarea defaultValue={t.body} rows={t.channel === "SMS" ? 3 : 5} onBlur={(e) => saveTemplate(t.id, e.target.value)} />
             </div>
           ))}
         </div>

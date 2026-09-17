@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { formatCZK, formatDate, formatPct } from "@/lib/format";
 import { FLIP_BAND_ICONS, FLIP_BAND_LABELS } from "@/lib/calc";
-import { DATA_CONFIDENCE_LABELS } from "@/lib/types";
+import { DATA_CONFIDENCE_LABELS, SMS_FEED_STATUS_LABELS } from "@/lib/types";
 import type { DealFeedItem } from "@/lib/dealFeed";
 
 const BAND_STYLES: Record<string, string> = {
@@ -18,6 +18,14 @@ const CONFIDENCE_STYLES: Record<string, string> = {
   HIGH: "text-band-good",
   MEDIUM: "text-band-normal",
   LOW: "text-band-bad"
+};
+
+const SMS_STATUS_STYLES: Record<string, string> = {
+  SMS_NEODESLANA: "bg-beige-100 text-muted",
+  SMS_DRAFT: "bg-band-normalBg text-band-normal",
+  SMS_ODESLANA: "bg-band-normalBg text-band-normal",
+  MAKLER_ODPOVEDEL: "bg-band-goodBg text-band-good",
+  PROHLIDKA_NAVRZENA: "bg-band-hotBg text-band-hot"
 };
 
 export function DealCard({ item }: { item: DealFeedItem }) {
@@ -59,6 +67,12 @@ export function DealCard({ item }: { item: DealFeedItem }) {
           {" · nalezeno "}
           {formatDate(item.createdAt)}
         </div>
+
+        <span
+          className={`mt-2 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium uppercase ${SMS_STATUS_STYLES[item.smsStatus]}`}
+        >
+          {SMS_FEED_STATUS_LABELS[item.smsStatus]}
+        </span>
 
         <div className="mt-3 grid grid-cols-2 gap-y-2 text-xs">
           <Metric label="Nabídková cena" value={formatCZK(item.askingPrice)} />

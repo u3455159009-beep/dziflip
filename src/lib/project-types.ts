@@ -101,6 +101,31 @@ export interface OutreachMessageDTO {
   sentAt: string | null;
 }
 
+export interface SmsMessageDTO {
+  id: string;
+  projectId: string | null;
+  contactId: string | null;
+  direction: string;
+  kind: string;
+  mode: string | null;
+  phone: string;
+  body: string;
+  status: string;
+  provider: string;
+  isDemo: boolean;
+  providerMessageId: string | null;
+  blockedReason: string | null;
+  classification: string | null;
+  suggestedDateTimeRaw: string | null;
+  suggestedDateTime: string | null;
+  readAt: string | null;
+  createdAt: string;
+  queuedAt: string | null;
+  sentAt: string | null;
+  deliveredAt: string | null;
+  failedAt: string | null;
+}
+
 export interface ProjectDTO {
   id: string;
   status: string;
@@ -147,4 +172,5 @@ export interface ProjectDTO {
   priceHistory: PriceHistoryDTO[];
   contact: ContactDTO | null;
   outreachMessages: OutreachMessageDTO[];
+  smsMessages: SmsMessageDTO[];
 }

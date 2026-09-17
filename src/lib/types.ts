@@ -240,3 +240,76 @@ export const OWNERSHIP_FILTER_LABELS: Record<OwnershipFilter, string> = {
   OSOBNI: "Osobní",
   DRUZSTEVNI: "Družstevní"
 };
+
+// --- Phase 3: SMS Hub ---
+
+export const SMS_STATUSES = ["DRAFT", "QUEUED", "SENT", "DELIVERED", "FAILED", "RECEIVED"] as const;
+export type SmsStatus = (typeof SMS_STATUSES)[number];
+
+export const SMS_STATUS_LABELS: Record<SmsStatus, string> = {
+  DRAFT: "Návrh",
+  QUEUED: "Ve frontě",
+  SENT: "Odesláno",
+  DELIVERED: "Doručeno",
+  FAILED: "Selhalo",
+  RECEIVED: "Přijato"
+};
+
+export const SMS_AUTOMATION_MODES = ["OFF", "DRAFT", "AUTO"] as const;
+export type SmsAutomationMode = (typeof SMS_AUTOMATION_MODES)[number];
+
+export const SMS_AUTOMATION_MODE_LABELS: Record<SmsAutomationMode, string> = {
+  OFF: "Vypnuto",
+  DRAFT: "Návrh ke schválení",
+  AUTO: "Automaticky"
+};
+
+export const SMS_PROVIDERS = ["MOCK_SMS", "REAL_SMS"] as const;
+export type SmsProviderKey = (typeof SMS_PROVIDERS)[number];
+
+export const SMS_PROVIDER_LABELS: Record<SmsProviderKey, string> = {
+  MOCK_SMS: "MOCK (testovací)",
+  REAL_SMS: "Skutečný SMS provider"
+};
+
+export const SMS_CLASSIFICATIONS = [
+  "NABIZI_PROHLIDKU",
+  "CHCE_ZAVOLAT",
+  "NEMOVITOST_PRODANA",
+  "NEMA_ZAJEM",
+  "CHCE_DALSI_INFORMACE",
+  "JINE",
+  "UNKNOWN"
+] as const;
+export type SmsClassification = (typeof SMS_CLASSIFICATIONS)[number];
+
+export const SMS_CLASSIFICATION_LABELS: Record<SmsClassification, string> = {
+  NABIZI_PROHLIDKU: "Nabízí prohlídku",
+  CHCE_ZAVOLAT: "Chce zavolat",
+  NEMOVITOST_PRODANA: "Nemovitost prodána",
+  NEMA_ZAJEM: "Nemá zájem",
+  CHCE_DALSI_INFORMACE: "Chce další informace",
+  JINE: "Jiné",
+  UNKNOWN: "Neurčeno"
+};
+
+export const SMS_KINDS = ["INTRO", "REPLY"] as const;
+export type SmsKind = (typeof SMS_KINDS)[number];
+
+// Deal Feed card SMS status — derived, not stored.
+export const SMS_FEED_STATUSES = [
+  "SMS_NEODESLANA",
+  "SMS_DRAFT",
+  "SMS_ODESLANA",
+  "MAKLER_ODPOVEDEL",
+  "PROHLIDKA_NAVRZENA"
+] as const;
+export type SmsFeedStatus = (typeof SMS_FEED_STATUSES)[number];
+
+export const SMS_FEED_STATUS_LABELS: Record<SmsFeedStatus, string> = {
+  SMS_NEODESLANA: "SMS neodeslána",
+  SMS_DRAFT: "SMS draft",
+  SMS_ODESLANA: "SMS odeslána",
+  MAKLER_ODPOVEDEL: "Makléř odpověděl",
+  PROHLIDKA_NAVRZENA: "Prohlídka navržena"
+};

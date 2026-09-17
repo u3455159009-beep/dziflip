@@ -13,10 +13,10 @@ Prosím o informaci, jaké jsou nejbližší možné termíny prohlídky.
 Děkuji a přeji hezký den.`;
 
 export async function getDefaultTemplate() {
-  const existing = await prisma.messageTemplate.findFirst({ where: { isDefault: true } });
+  const existing = await prisma.messageTemplate.findFirst({ where: { isDefault: true, channel: "EMAIL" } });
   if (existing) return existing;
   return prisma.messageTemplate.create({
-    data: { name: "Žádost o prohlídku (výchozí)", body: DEFAULT_TEMPLATE_BODY, isDefault: true }
+    data: { name: "Žádost o prohlídku (výchozí)", body: DEFAULT_TEMPLATE_BODY, channel: "EMAIL", isDefault: true }
   });
 }
 

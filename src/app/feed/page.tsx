@@ -11,7 +11,8 @@ export default async function FeedPage() {
       photos: { take: 1, orderBy: { sortOrder: "asc" } },
       comparables: { select: { pricePerM2: true } },
       budgetItems: { select: { id: true } },
-      assumptions: true
+      assumptions: true,
+      smsMessages: { select: { status: true, direction: true, classification: true } }
     }
   });
 
