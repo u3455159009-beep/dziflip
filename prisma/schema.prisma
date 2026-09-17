@@ -1,0 +1,144 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// SQLite has no native enum support in Prisma; statuses are validated in TS (see src/lib/types.ts)
+// ProjectStatus: ACTIVE | WATCHED | BOUGHT | RENOVATING | SOLD | REJECTED
+// PriceType: ASKING | ESTIMATE | REALIZED
+// DataConfidence: VERIFIED | ESTIMATED | UNKNOWN
+// PriceSource: EXACT | ESTIMATE | MANUAL
+
+model Project {
+  id        String   @id @default(cuid())
+  status    String   @default("ACTIVE")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Source
+  sourceUrl  String?
+  sourceText String?
+  portal     String?
+
+  // Extracted listing fields
+  title             String?
+  askingPrice       Float?
+  disposition       String?
+  areaM2            Float?
+  pricePerM2        Float?
+  municipality      String?
+  district          String?
+  street            String?
+  floor             String?
+  totalFloors       String?
+  buildingType      String?
+  construction      String?
+  ownership         String?
+  condition         String?
+  buildingCondition String?
+  penb              String?
+  balcony           Boolean?
+  terrace           Boolean?
+  loggia            Boolean?
+  cellar            Boolean?
+  parking           Boolean?
+  elevator          Boolean?
+  orientation       String?
+  legalNotes        String?
+  fullText          String?
+
+  // JSON map of fieldName -> DataConfidence, stored as string
+  fieldMeta String?
+
+  // My own targets
+  targetPrice Float?
+
+  photos      Photo[]
+  comparables Comparable[]
+  budgetItems BudgetItem[]
+  assumptions Assumptions?
+}
+
+model Photo {
+  id        String   @id @default(cuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  url       String
+  room      String?
+  notes     String?
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+}
+
+model Comparable {
+  id           String      @id @default(cuid())
+  projectId    String
+  project      Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  title        String?
+  url          String?
+  portal       String?
+  locality     String?
+  disposition  String?
+  areaM2       Float?
+  price        Float?
+  pricePerM2   Float?
+  condition    String?
+  distanceKm   Float?
+  priceType    String      @default("ASKING")
+  foundAt      DateTime    @default(now())
+  createdAt    DateTime    @default(now())
+}
+
+model BudgetItem {
+  id               String      @id @default(cuid())
+  projectId        String
+  project          Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  room             String?
+  category         String
+  name             String
+  quantity         Float?
+  unit             String?
+  unitPrice        Float?
+  laborEstimate    Float?
+  materialEstimate Float?
+  total            Float?
+  priceSource      String      @default("ESTIMATE")
+  productUrl       String?
+  shop             String?
+  verifiedAt       DateTime?
+  createdAt        DateTime    @default(now())
+  sortOrder        Int         @default(0)
+}
+
+model Assumptions {
+  id        String  @id @default(cuid())
+  projectId String  @unique
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  purchasePriceUsed Float? // price used for economics calc (defaults to askingPrice)
+
+  saleConservative Float?
+  saleBase         Float?
+  saleOptimistic   Float?
+
+  renovationCost   Float?
+  furnishingCost   Float?
+  legalCosts       Float?
+  financingCost    Float?
+  otherCosts       Float?
+  reserve          Float?
+
+  minProfit   Float?
+  minMarginPct Float? // 0-1
+  minRoiPct    Float? // 0-1
+
+  incomeTaxPct Float? // 0-1, optional, default 0
+
+  bandWidthPct Float? // width of NORMAL/BUY-NOW bands around the good threshold, default 0.08
+
+  updatedAt DateTime @updatedAt
+}
