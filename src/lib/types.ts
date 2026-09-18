@@ -116,6 +116,7 @@ export type FieldMeta = Partial<Record<ListingField, Confidence>>;
 export const BUDGET_CATEGORIES = [
   "DEMOLICE",
   "STAVEBNI_PRACE",
+  "STAVEBNI_MATERIAL",
   "ELEKTRO",
   "VODA",
   "PODLAHY",
@@ -123,10 +124,12 @@ export const BUDGET_CATEGORIES = [
   "KOUPELNA",
   "KUCHYN",
   "NABYTEK",
+  "SPOTREBICE",
   "SVETLA",
   "DEKORACE",
   "PRACE",
   "DOPRAVA",
+  "OSTATNI",
   "REZERVA"
 ] as const;
 export type BudgetCategory = (typeof BUDGET_CATEGORIES)[number];
@@ -134,6 +137,7 @@ export type BudgetCategory = (typeof BUDGET_CATEGORIES)[number];
 export const BUDGET_CATEGORY_LABELS: Record<BudgetCategory, string> = {
   DEMOLICE: "Demolice",
   STAVEBNI_PRACE: "Stavební práce",
+  STAVEBNI_MATERIAL: "Stavební materiál",
   ELEKTRO: "Elektro",
   VODA: "Voda",
   PODLAHY: "Podlahy",
@@ -141,10 +145,12 @@ export const BUDGET_CATEGORY_LABELS: Record<BudgetCategory, string> = {
   KOUPELNA: "Koupelna",
   KUCHYN: "Kuchyň",
   NABYTEK: "Nábytek",
+  SPOTREBICE: "Spotřebiče",
   SVETLA: "Světla",
   DEKORACE: "Dekorace",
   PRACE: "Práce",
   DOPRAVA: "Doprava",
+  OSTATNI: "Ostatní",
   REZERVA: "Rezerva"
 };
 
@@ -472,17 +478,153 @@ export const PHOTO_GENERATION_STYLE_LABELS: Record<PhotoGenerationStyle, string>
   CUSTOM: "Vlastní"
 };
 
-export const PRODUCT_REQUIREMENT_STATUSES = ["NEEDED", "MATCHED", "ORDERED", "SKIPPED"] as const;
+export const PRODUCT_REQUIREMENT_STATUSES = [
+  "NEEDED",
+  "SELECTED",
+  "TO_BUY",
+  "ORDERED",
+  "BOUGHT",
+  "PICKED_UP",
+  "INSTALLED"
+] as const;
 export type ProductRequirementStatus = (typeof PRODUCT_REQUIREMENT_STATUSES)[number];
 
 export const PRODUCT_REQUIREMENT_STATUS_LABELS: Record<ProductRequirementStatus, string> = {
-  NEEDED: "Potřeba",
-  MATCHED: "Nalezen produkt",
+  NEEDED: "Potřebujeme",
+  SELECTED: "Vybráno",
+  TO_BUY: "Koupit",
   ORDERED: "Objednáno",
-  SKIPPED: "Přeskočeno"
+  BOUGHT: "Koupeno",
+  PICKED_UP: "Vyzvednuto",
+  INSTALLED: "Namontováno"
 };
 
 // Deal Score V2 — when critical inputs are missing/low-confidence, the
 // colored band must not be shown as a confident verdict.
 export const DEAL_SCORE_CONFIDENCE = ["HIGH", "LOW_DATA"] as const;
 export type DealScoreConfidence = (typeof DEAL_SCORE_CONFIDENCE)[number];
+
+// --- Phase 5: Real Product Shopping & Renovation Engine ---
+
+export const SHOPPING_CATEGORIES = [
+  "STAVEBNI_MATERIAL",
+  "KOUPELNA",
+  "KUCHYN",
+  "OSVETLENI",
+  "NABYTEK",
+  "SPOTREBICE",
+  "DEKORACE",
+  "OSTATNI"
+] as const;
+export type ShoppingCategory = (typeof SHOPPING_CATEGORIES)[number];
+
+export const SHOPPING_CATEGORY_LABELS: Record<ShoppingCategory, string> = {
+  STAVEBNI_MATERIAL: "Stavební materiál",
+  KOUPELNA: "Koupelna",
+  KUCHYN: "Kuchyň",
+  OSVETLENI: "Osvětlení",
+  NABYTEK: "Nábytek",
+  SPOTREBICE: "Spotřebiče",
+  DEKORACE: "Dekorace",
+  OSTATNI: "Ostatní"
+};
+
+export const PRODUCT_CATEGORIES = [
+  "PODLAHY",
+  "LISTY",
+  "BARVY",
+  "OBKLADY",
+  "DLAZBY",
+  "LEPIDLA",
+  "SPAROVACI_HMOTY",
+  "SVETLA",
+  "ZASUVKY",
+  "VYPINACE",
+  "DVERE",
+  "KLIKY",
+  "SANITA",
+  "WC",
+  "UMYVADLA",
+  "SPRCHY",
+  "VANY",
+  "VODOVODNI_BATERIE",
+  "KUCHYNE",
+  "PRACOVNI_DESKY",
+  "DREZY",
+  "SPOTREBICE",
+  "POSTELE",
+  "MATRACE",
+  "SKRINE",
+  "STOLY",
+  "ZIDLE",
+  "POHOVKY",
+  "KRESLA",
+  "KONFERENCNI_STOLKY",
+  "ZRCADLA",
+  "ZAVESY",
+  "DEKORACE",
+  "OSTATNI"
+] as const;
+export type ProductCategory = (typeof PRODUCT_CATEGORIES)[number];
+
+export const PRODUCT_CATEGORY_LABELS: Record<ProductCategory, string> = {
+  PODLAHY: "Podlahy",
+  LISTY: "Lišty",
+  BARVY: "Barvy",
+  OBKLADY: "Obklady",
+  DLAZBY: "Dlažby",
+  LEPIDLA: "Lepidla",
+  SPAROVACI_HMOTY: "Spárovací hmoty",
+  SVETLA: "Světla",
+  ZASUVKY: "Zásuvky",
+  VYPINACE: "Vypínače",
+  DVERE: "Dveře",
+  KLIKY: "Kliky",
+  SANITA: "Sanita",
+  WC: "WC",
+  UMYVADLA: "Umyvadla",
+  SPRCHY: "Sprchy",
+  VANY: "Vany",
+  VODOVODNI_BATERIE: "Vodovodní baterie",
+  KUCHYNE: "Kuchyně",
+  PRACOVNI_DESKY: "Pracovní desky",
+  DREZY: "Dřezy",
+  SPOTREBICE: "Spotřebiče",
+  POSTELE: "Postele",
+  MATRACE: "Matrace",
+  SKRINE: "Skříně",
+  STOLY: "Stoly",
+  ZIDLE: "Židle",
+  POHOVKY: "Pohovky",
+  KRESLA: "Křesla",
+  KONFERENCNI_STOLKY: "Konferenční stolky",
+  ZRCADLA: "Zrcadla",
+  ZAVESY: "Závěsy",
+  DEKORACE: "Dekorace",
+  OSTATNI: "Ostatní"
+};
+
+export const PRODUCT_AVAILABILITIES = ["SKLADEM", "OMEZENE", "NENI_SKLADEM", "UNKNOWN"] as const;
+export type ProductAvailability = (typeof PRODUCT_AVAILABILITIES)[number];
+
+export const PRODUCT_AVAILABILITY_LABELS: Record<ProductAvailability, string> = {
+  SKLADEM: "Skladem",
+  OMEZENE: "Omezeně skladem",
+  NENI_SKLADEM: "Není skladem",
+  UNKNOWN: "Neznámé"
+};
+
+export const PRODUCT_TIERS = ["BUDGET", "STANDARD", "PREMIUM"] as const;
+export type ProductTier = (typeof PRODUCT_TIERS)[number];
+
+export const PRODUCT_TIER_LABELS: Record<ProductTier, string> = {
+  BUDGET: "Budget",
+  STANDARD: "Standard",
+  PREMIUM: "Premium"
+};
+
+export const PRODUCT_SOURCES = ["PROVIDER", "MANUAL"] as const;
+export type ProductSource = (typeof PRODUCT_SOURCES)[number];
+
+export const PRODUCT_STATUSES = ["CANDIDATE", "UNAVAILABLE"] as const;
+export type ProductStatus = (typeof PRODUCT_STATUSES)[number];

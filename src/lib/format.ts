@@ -30,3 +30,15 @@ export function formatDate(value: string | Date | null | undefined): string {
   const d = typeof value === "string" ? new Date(value) : value;
   return new Intl.DateTimeFormat("cs-CZ", { day: "numeric", month: "numeric", year: "numeric" }).format(d);
 }
+
+export function formatDateTime(value: string | Date | null | undefined): string {
+  if (!value) return "—";
+  const d = typeof value === "string" ? new Date(value) : value;
+  return new Intl.DateTimeFormat("cs-CZ", {
+    day: "numeric",
+    month: "numeric",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(d);
+}

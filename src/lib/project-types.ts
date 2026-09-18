@@ -83,19 +83,73 @@ export interface RoomConditionDTO {
   updatedAt: string;
 }
 
+export interface ProductBranchDTO {
+  id: string;
+  productId: string;
+  name: string;
+  address: string | null;
+  stockStatus: string;
+  stockQty: number | null;
+  personalPickup: boolean;
+  updatedAt: string;
+}
+
+export interface ProductPriceHistoryDTO {
+  id: string;
+  productId: string;
+  price: number | null;
+  availability: string | null;
+  recordedAt: string;
+}
+
+export interface ProductDTO {
+  id: string;
+  productRequirementId: string;
+  externalId: string | null;
+  provider: string;
+  source: string;
+  name: string;
+  brand: string | null;
+  category: string;
+  description: string | null;
+  imageUrl: string | null;
+  productUrl: string | null;
+  retailer: string | null;
+  price: number | null;
+  originalPrice: number | null;
+  unitPrice: number | null;
+  unit: string | null;
+  packSize: number | null;
+  packUnit: string | null;
+  availability: string;
+  tier: string | null;
+  confidence: string;
+  status: string;
+  isSelected: boolean;
+  lastCheckedAt: string | null;
+  createdAt: string;
+  branches: ProductBranchDTO[];
+  priceHistory: ProductPriceHistoryDTO[];
+}
+
 export interface ProductRequirementDTO {
   id: string;
   projectId: string;
   room: string | null;
   category: string;
+  shoppingCategory: string;
   description: string;
   budgetMin: number | null;
   budgetMax: number | null;
   dimensions: string | null;
   style: string | null;
   quantity: number;
+  quantityNeeded: number | null;
+  quantityUnit: string | null;
+  reservePct: number;
   status: string;
   createdAt: string;
+  products: ProductDTO[];
 }
 
 export interface PossibleDuplicateDTO {
@@ -134,6 +188,7 @@ export interface BudgetItemDTO {
   verifiedAt: string | null;
   createdAt: string;
   sortOrder: number;
+  productRequirementId: string | null;
 }
 
 export interface AssumptionsDTO {

@@ -36,7 +36,16 @@ datasource db {
 // DataSourceKind: MANUAL | AI_VISION | PROVIDER
 // PhotoGenerationStatus: NOT_CONFIGURED | PENDING | GENERATED | FAILED
 // PhotoGenerationStyle: LEVNY_FLIP | MODERNI | PREMIUM | MINIMALISTICKY | SCANDI | LUXURY | CUSTOM
-// ProductRequirementStatus: NEEDED | MATCHED | ORDERED | SKIPPED
+// ProductRequirementStatus: NEEDED | SELECTED | TO_BUY | ORDERED | BOUGHT | PICKED_UP | INSTALLED
+// ShoppingCategory: STAVEBNI_MATERIAL | KOUPELNA | KUCHYN | OSVETLENI | NABYTEK | SPOTREBICE | DEKORACE | OSTATNI
+// ProductCategory: PODLAHY | LISTY | BARVY | OBKLADY | DLAZBY | LEPIDLA | SPAROVACI_HMOTY | SVETLA | ZASUVKY |
+//   VYPINACE | DVERE | KLIKY | SANITA | WC | UMYVADLA | SPRCHY | VANY | VODOVODNI_BATERIE | KUCHYNE |
+//   PRACOVNI_DESKY | DREZY | SPOTREBICE | POSTELE | MATRACE | SKRINE | STOLY | ZIDLE | POHOVKY | KRESLA |
+//   KONFERENCNI_STOLKY | ZRCADLA | ZAVESY | DEKORACE | OSTATNI
+// ProductAvailability: SKLADEM | OMEZENE | NENI_SKLADEM | UNKNOWN
+// ProductTier: BUDGET | STANDARD | PREMIUM
+// ProductSource: PROVIDER | MANUAL
+// ProductStatus: CANDIDATE | UNAVAILABLE
 
 model Project {
   id        String   @id @default(cuid())
@@ -267,6 +276,9 @@ model Settings {
   aiPhotoAnalysisEnabled Boolean @default(false)
   staleDataThresholdDays Int     @default(14)
 
+  // Real Product Shopping & Renovation Engine (Phase 5)
+  shoppingReferenceLocality String? // used only to bias product-branch search toward this area; never auto-detected
+
   updatedAt DateTime @updatedAt
 }
 
@@ -436,6 +448,11 @@ model BudgetItem {
   verifiedAt       DateTime?
   createdAt        DateTime  @default(now())
   sortOrder        Int       @default(0)
+
+  // Phase 5 — set only when this line was generated from selecting a real
+  // shopping-list product; a manually-added budget line never has this set.
+  productRequirementId String?             @unique
+  productRequirement   ProductRequirement? @relation(fields: [productRequirementId], references: [id], onDelete: SetNull)
 }
 
 // Generalized listing history beyond price (Real Data Engine, item 4).
@@ -483,21 +500,94 @@ model RoomCondition {
   @@unique([projectId, room, element])
 }
 
-// Product matching preparation (item 16) — no real product search yet.
+// Real Product Shopping & Renovation Engine (Phase 5). A ProductRequirement
+// is the need ("70 m² vinylové podlahy, světlý dub, do 500 Kč/m²"); Product
+// rows under it are real candidates found by a provider (or added
+// manually) — never fabricated. Exactly one candidate may be isSelected;
+// selecting one is the only thing that writes a real price into the
+// project's budget/economics (see BudgetItem.productRequirementId).
 model ProductRequirement {
-  id          String   @id @default(cuid())
-  projectId   String
-  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  room        String?
-  category    String
-  description String
-  budgetMin   Float?
-  budgetMax   Float?
-  dimensions  String?
-  style       String?
-  quantity    Int      @default(1)
-  status      String   @default("NEEDED") // NEEDED | MATCHED | ORDERED | SKIPPED
-  createdAt   DateTime @default(now())
+  id               String   @id @default(cuid())
+  projectId        String
+  project          Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  room             String?
+  category         String // one of PRODUCT_CATEGORIES (PODLAHY, OBKLADY, SANITA, ...)
+  shoppingCategory String   @default("OSTATNI") // STAVEBNI_MATERIAL | KOUPELNA | KUCHYN | OSVETLENI | NABYTEK | SPOTREBICE | DEKORACE | OSTATNI — top-level /shopping grouping
+  description      String
+  budgetMin        Float?
+  budgetMax        Float?
+  dimensions       String?
+  style            String?
+  quantity         Int      @default(1) // simple unit count (e.g. "1 vana") when not area/length-based
+  quantityNeeded   Float? // verified base quantity in `quantityUnit` (e.g. 64 m²) — only ever set from a real, known dimension, never invented
+  quantityUnit     String? // m2, bm, ks...
+  reservePct       Float    @default(0.1) // waste/reserve buffer applied on top of quantityNeeded
+  status           String   @default("NEEDED") // NEEDED | SELECTED | TO_BUY | ORDERED | BOUGHT | PICKED_UP | INSTALLED
+  createdAt        DateTime @default(now())
+
+  products   Product[]
+  budgetItem BudgetItem?
+}
+
+model Product {
+  id                   String             @id @default(cuid())
+  productRequirementId String
+  productRequirement   ProductRequirement @relation(fields: [productRequirementId], references: [id], onDelete: Cascade)
+
+  externalId String? // provider's own product id
+  provider   String // provider key, or "MANUAL"
+  source     String  @default("PROVIDER") // PROVIDER | MANUAL
+
+  name        String
+  brand       String?
+  category    String // PRODUCT_CATEGORIES
+  description String?
+  imageUrl    String?
+  productUrl  String? // must point at the specific product, never a homepage
+  retailer    String?
+
+  price         Float?
+  originalPrice Float?
+  unitPrice     Float?
+  unit          String? // m2, ks, bm...
+  packSize      Float? // e.g. 2.2 (m² per balení) — null when sold as single units
+  packUnit      String? // "balení"
+
+  availability String  @default("UNKNOWN") // SKLADEM | OMEZENE | NENI_SKLADEM | UNKNOWN
+  tier         String? // BUDGET | STANDARD | PREMIUM
+
+  confidence String  @default("UNKNOWN") // VERIFIED | ESTIMATED | UNKNOWN — never claims VERIFIED without a real, just-checked source
+  status     String  @default("CANDIDATE") // CANDIDATE | UNAVAILABLE
+  isSelected Boolean @default(false)
+
+  lastCheckedAt DateTime?
+  createdAt     DateTime  @default(now())
+
+  branches     ProductBranch[]
+  priceHistory ProductPriceHistory[]
+}
+
+// Per-branch stock, populated only when a provider's source data genuinely
+// carries it — quantities are never estimated or guessed.
+model ProductBranch {
+  id             String   @id @default(cuid())
+  productId      String
+  product        Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  name           String
+  address        String?
+  stockStatus    String   @default("UNKNOWN") // SKLADEM | OMEZENE | NENI_SKLADEM | UNKNOWN
+  stockQty       Int? // only when the source truly reports a count
+  personalPickup Boolean  @default(false)
+  updatedAt      DateTime @default(now())
+}
+
+model ProductPriceHistory {
+  id           String   @id @default(cuid())
+  productId    String
+  product      Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  price        Float?
+  availability String?
+  recordedAt   DateTime @default(now())
 }
 
 // Provider/pipeline error isolation (item 22) — one bad listing or provider

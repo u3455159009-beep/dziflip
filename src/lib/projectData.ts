@@ -19,7 +19,12 @@ export const PROJECT_INCLUDE = {
   smsMessages: { orderBy: { createdAt: "asc" as const } },
   listingEvents: { orderBy: { occurredAt: "desc" as const } },
   roomConditions: true,
-  productRequirements: { orderBy: { createdAt: "desc" as const } },
+  productRequirements: {
+    orderBy: { createdAt: "desc" as const },
+    include: {
+      products: { orderBy: { createdAt: "asc" as const }, include: { branches: true, priceHistory: { orderBy: { recordedAt: "asc" as const } } } }
+    }
+  },
   duplicatesAsA: { include: { projectB: { select: { id: true, title: true, municipality: true, district: true, askingPrice: true, isDemo: true } } } },
   duplicatesAsB: { include: { projectA: { select: { id: true, title: true, municipality: true, district: true, askingPrice: true, isDemo: true } } } }
 };

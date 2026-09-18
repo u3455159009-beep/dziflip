@@ -68,6 +68,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
               <Link href="/projects" className="hover:text-ink transition-colors">
                 Projekty
               </Link>
+              <Link href="/shopping" className="hover:text-ink transition-colors">
+                Nákupy
+              </Link>
               <Link href="/compare" className="hover:text-ink transition-colors">
                 Porovnání
               </Link>

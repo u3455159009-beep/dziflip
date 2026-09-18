@@ -13,7 +13,7 @@ import { EconomicsSection } from "./EconomicsSection";
 import { PhotosGallery } from "./PhotosGallery";
 import { RoomConditionPanel } from "./RoomConditionPanel";
 import { BudgetSection } from "./BudgetSection";
-import { ProductRequirementsPanel } from "./ProductRequirementsPanel";
+import { ShoppingListSection } from "./ShoppingListSection";
 import { PriceDropWatch } from "./PriceDropWatch";
 import { ListingTimeline } from "./ListingTimeline";
 import { ContactOutreach } from "./ContactOutreach";
@@ -182,7 +182,11 @@ export function ProjectView({
 
       <BudgetSection projectId={project.id} items={project.budgetItems} />
 
-      <ProductRequirementsPanel projectId={project.id} requirements={project.productRequirements} />
+      <ShoppingListSection
+        projectId={project.id}
+        requirements={project.productRequirements}
+        staleDataThresholdDays={staleDataThresholdDays ?? 14}
+      />
 
       <ContactOutreach projectId={project.id} contact={project.contact} messages={project.outreachMessages} />
 

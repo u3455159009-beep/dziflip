@@ -36,6 +36,7 @@ export interface SettingsDTO {
   maxCompAgeDays: number;
   aiPhotoAnalysisEnabled: boolean;
   staleDataThresholdDays: number;
+  shoppingReferenceLocality: string | null;
 }
 
 export interface TemplateDTO {
@@ -487,6 +488,17 @@ export function SettingsManager({
             onBlur={(e) => patchSettings({ staleDataThresholdDays: e.target.value || 14 })}
           />
         </div>
+      </Card>
+
+      <Card>
+        <SectionTitle subtitle="Referenční lokalita se používá pouze k vyhledávání poboček obchodů u produktů (Fáze 5) — aplikace nikdy neukládá ani nezjišťuje přesnou polohu tvého zařízení.">
+          Real Product Shopping Engine
+        </SectionTitle>
+        <Input
+          label="Referenční lokalita (např. 'Praha 5')"
+          defaultValue={settings.shoppingReferenceLocality ?? ""}
+          onBlur={(e) => patchSettings({ shoppingReferenceLocality: e.target.value || null })}
+        />
       </Card>
     </div>
   );

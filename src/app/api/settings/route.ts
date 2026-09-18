@@ -10,7 +10,7 @@ export async function GET() {
 const NUMERIC_FIELDS = ["defaultMinProfit", "defaultMinRoiPct", "defaultReserve", "defaultRenovationCostPerM2", "maxCompDistanceKm"];
 const INT_FIELDS = ["dailyContactLimit", "maxAutoSmsPerDay", "minCompCount", "maxCompAgeDays", "staleDataThresholdDays"];
 const BOOL_FIELDS = ["notifyInApp", "notifyEmail", "smsAutoReplyEnabled", "showDemoData", "aiPhotoAnalysisEnabled"];
-const STRING_FIELDS = ["notifyEmailAddress", "defaultTemplateId", "defaultSmsTemplateId"];
+const STRING_FIELDS = ["notifyEmailAddress", "defaultTemplateId", "defaultSmsTemplateId", "shoppingReferenceLocality"];
 
 export async function PATCH(req: NextRequest) {
   const body = await req.json().catch(() => null);
