@@ -31,4 +31,5 @@ export interface WatcherRunSummaryDTO {
   updatedProjects: number;
   priceDrops: number;
   alerts: number;
+  itemErrors: number;
 }

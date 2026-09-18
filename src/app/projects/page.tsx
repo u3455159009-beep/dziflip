@@ -3,11 +3,21 @@ import { prisma } from "@/lib/prisma";
 import { PROJECT_STATUSES, PROJECT_STATUS_LABELS } from "@/lib/types";
 import { formatCZK } from "@/lib/format";
 import { computeMaxBuyPrice, type AssumptionsInput } from "@/lib/calc";
+import { getSettings } from "@/lib/settings";
+import { computeDataOrigin, DATA_ORIGIN_LABELS } from "@/lib/dataOrigin";
 
 export const dynamic = "force-dynamic";
 
+const ORIGIN_BADGE_STYLES: Record<string, string> = {
+  DEMO: "bg-ink/80 text-paper",
+  REAL: "bg-band-good text-white",
+  MANUAL: "bg-beige-400 text-white"
+};
+
 export default async function ProjectsPage() {
+  const settings = await getSettings();
   const projects = await prisma.project.findMany({
+    where: settings.showDemoData ? undefined : { isDemo: false },
     orderBy: { updatedAt: "desc" },
     include: { photos: { take: 1, orderBy: { sortOrder: "asc" } }, assumptions: true }
   });
@@ -56,11 +66,11 @@ export default async function ProjectsPage() {
                               Bez fotografie
                             </div>
                           )}
-                          {p.isDemo && (
-                            <span className="absolute left-2 top-2 rounded-full bg-ink/80 px-2 py-0.5 text-[10px] font-medium uppercase text-paper">
-                              DEMO
-                            </span>
-                          )}
+                          <span
+                            className={`absolute left-2 top-2 rounded-full px-2 py-0.5 text-[10px] font-medium uppercase ${ORIGIN_BADGE_STYLES[computeDataOrigin(p)]}`}
+                          >
+                            {DATA_ORIGIN_LABELS[computeDataOrigin(p)]}
+                          </span>
                         </div>
                         <div className="p-4">
                           <div className="truncate font-medium text-ink">{p.title || "Nepojmenovaná nemovitost"}</div>

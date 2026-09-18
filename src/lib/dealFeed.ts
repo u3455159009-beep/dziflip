@@ -11,7 +11,10 @@ import {
   type FlipBand
 } from "./calc";
 import { computeDataConfidence, type ConfidenceBreakdownItem } from "./confidence";
-import type { FieldMeta, DataConfidenceLevel, SmsFeedStatus } from "./types";
+import { computeARV, type MarketValueComparable, type MarketValueEstimate } from "./marketValue";
+import { isDataStale } from "./staleData";
+import { computeDataOrigin, type DataOrigin } from "./dataOrigin";
+import type { FieldMeta, DataConfidenceLevel, SmsFeedStatus, CompQualityTier, DealScoreConfidence } from "./types";
 
 export interface DealFeedItem {
   id: string;
@@ -25,6 +28,7 @@ export interface DealFeedItem {
   photoUrl: string | null;
   createdAt: string;
   isDemo: boolean;
+  dataOrigin: DataOrigin;
   status: string;
   renovationEstimate: number | null;
   maxBuyPrice: number | null;
@@ -33,6 +37,7 @@ export interface DealFeedItem {
   roiPct: number | null;
   band: FlipBand | null;
   dataConfidenceLevel: DataConfidenceLevel;
+  dealScoreConfidence: DealScoreConfidence;
   smsStatus: SmsFeedStatus;
   why: {
     purchasePrice: number | null;
@@ -48,6 +53,7 @@ export interface DealFeedItem {
     comparablesCount: number;
     comparablesAvgPricePerM2: number | null;
     confidenceBreakdown: ConfidenceBreakdownItem[];
+    arv: { confidence: MarketValueEstimate["confidence"]; insufficientData: boolean; base: number | null };
     sourceUrl: string | null;
     portal: string | null;
   };
@@ -68,11 +74,19 @@ export interface ProjectForFeed {
   sourceUrl: string | null;
   portal: string | null;
   fieldMeta: string | null;
+  lastVerifiedAt: Date | null;
+  sourceWatcherId: string | null;
   photos: { url: string }[];
-  comparables: { pricePerM2: number | null }[];
+  comparables: { pricePerM2: number | null; qualityTier: string | null; priceType: string; condition: string | null }[];
   budgetItems: { id: string }[];
   assumptions: AssumptionsInput | null;
   smsMessages: { status: string; direction: string; classification: string | null }[];
+}
+
+export interface DealFeedOptions {
+  minCompCount: number;
+  minCompQuality: CompQualityTier;
+  staleDataThresholdDays: number;
 }
 
 function computeSmsStatus(messages: ProjectForFeed["smsMessages"]): SmsFeedStatus {
@@ -86,7 +100,7 @@ function computeSmsStatus(messages: ProjectForFeed["smsMessages"]): SmsFeedStatu
   return "SMS_NEODESLANA";
 }
 
-export function buildDealFeedItem(project: ProjectForFeed): DealFeedItem {
+export function buildDealFeedItem(project: ProjectForFeed, opts: DealFeedOptions): DealFeedItem {
   const fieldMeta: FieldMeta = project.fieldMeta ? JSON.parse(project.fieldMeta) : {};
   const comparablesCount = project.comparables.length;
   const comparableStats = computeComparableStats(project.comparables.map((c) => c.pricePerM2 ?? NaN));
@@ -123,8 +137,25 @@ export function buildDealFeedItem(project: ProjectForFeed): DealFeedItem {
     comparablesCount,
     hasRealBudgetItems: project.budgetItems.length > 0,
     renovationCostSet: Boolean(a?.renovationCost && a.renovationCost > 0),
-    salePriceSet: Boolean(a?.saleBase)
+    salePriceSet: Boolean(a?.saleBase),
+    isStale: isDataStale(project.lastVerifiedAt, opts.staleDataThresholdDays)
   });
+
+  const marketValueComparables: MarketValueComparable[] = project.comparables.map((c) => ({
+    pricePerM2: c.pricePerM2,
+    qualityTier: (c.qualityTier as CompQualityTier | null) ?? null,
+    priceType: c.priceType,
+    condition: c.condition
+  }));
+  const arv = computeARV(marketValueComparables, project.areaM2, opts);
+
+  // Deal Score V2: a GOOD/BUY_NOW classification may only claim HIGH
+  // confidence when the underlying data actually supports it — data
+  // confidence is HIGH *and* the After-Renovation Value itself isn't
+  // built on a thin or absent renovated-comparable sample. Anything else
+  // is reported as "needs verification," never as a falsely certain deal.
+  const dealScoreConfidence: DealScoreConfidence =
+    confidence.level === "HIGH" && !arv.insufficientData && arv.confidence !== "LOW" ? "HIGH" : "LOW_DATA";
 
   return {
     id: project.id,
@@ -138,6 +169,7 @@ export function buildDealFeedItem(project: ProjectForFeed): DealFeedItem {
     photoUrl: project.photos[0]?.url ?? null,
     createdAt: project.createdAt.toISOString(),
     isDemo: project.isDemo,
+    dataOrigin: computeDataOrigin(project),
     status: project.status,
     renovationEstimate: a?.renovationCost ?? null,
     maxBuyPrice,
@@ -146,6 +178,7 @@ export function buildDealFeedItem(project: ProjectForFeed): DealFeedItem {
     roiPct,
     band,
     dataConfidenceLevel: confidence.level,
+    dealScoreConfidence,
     smsStatus: computeSmsStatus(project.smsMessages),
     why: {
       purchasePrice,
@@ -161,6 +194,7 @@ export function buildDealFeedItem(project: ProjectForFeed): DealFeedItem {
       comparablesCount,
       comparablesAvgPricePerM2: comparableStats.average,
       confidenceBreakdown: confidence.breakdown,
+      arv: { confidence: arv.confidence, insufficientData: arv.insufficientData, base: arv.base.value },
       sourceUrl: project.sourceUrl,
       portal: project.portal
     }

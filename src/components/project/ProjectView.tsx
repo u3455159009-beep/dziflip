@@ -5,20 +5,47 @@ import { useState } from "react";
 import Link from "next/link";
 import { Card, Select } from "@/components/ui";
 import { formatCZK, formatDate } from "@/lib/format";
-import { PROJECT_STATUSES, PROJECT_STATUS_LABELS } from "@/lib/types";
+import { PROJECT_STATUSES, PROJECT_STATUS_LABELS, ANALYSIS_STAGE_LABELS, type AnalysisStage } from "@/lib/types";
 import type { ProjectDTO } from "@/lib/project-types";
 import { ListingFields } from "./ListingFields";
 import { ComparablesTable } from "./ComparablesTable";
 import { EconomicsSection } from "./EconomicsSection";
 import { PhotosGallery } from "./PhotosGallery";
+import { RoomConditionPanel } from "./RoomConditionPanel";
 import { BudgetSection } from "./BudgetSection";
+import { ProductRequirementsPanel } from "./ProductRequirementsPanel";
 import { PriceDropWatch } from "./PriceDropWatch";
+import { ListingTimeline } from "./ListingTimeline";
 import { ContactOutreach } from "./ContactOutreach";
 import { DataConfidencePanel } from "./DataConfidencePanel";
+import { SourceEvidencePanel } from "./SourceEvidencePanel";
 import { SmsConversation } from "./SmsConversation";
+import { DuplicatesPanel } from "./DuplicatesPanel";
+import { MarketValuePanel } from "./MarketValuePanel";
+import { computeDataOrigin, DATA_ORIGIN_LABELS } from "@/lib/dataOrigin";
+import { isDataStale } from "@/lib/staleData";
 import type { FieldMeta } from "@/lib/types";
+import type { MarketValueEstimate } from "@/lib/marketValue";
 
-export function ProjectView({ project }: { project: ProjectDTO }) {
+const ORIGIN_BADGE_STYLES: Record<string, string> = {
+  DEMO: "bg-ink/80 text-paper",
+  REAL: "bg-band-good text-white",
+  MANUAL: "bg-beige-400 text-white"
+};
+
+export function ProjectView({
+  project,
+  marketValue,
+  arv,
+  staleDataThresholdDays
+}: {
+  project: ProjectDTO;
+  marketValue?: MarketValueEstimate;
+  arv?: MarketValueEstimate;
+  staleDataThresholdDays?: number;
+}) {
+  const dataOrigin = computeDataOrigin(project);
+  const stale = isDataStale(project.lastVerifiedAt, staleDataThresholdDays ?? 14);
   const searchParams = useSearchParams();
   const showWarning = searchParams.get("warning") === "1";
   const [status, setStatus] = useState(project.status);
@@ -51,11 +78,19 @@ export function ProjectView({ project }: { project: ProjectDTO }) {
           <div>
             <div className="flex items-center gap-2">
               <h1 className="font-serif text-3xl text-ink">{project.title || "Nepojmenovaná nemovitost"}</h1>
-              {project.isDemo && (
-                <span className="rounded-full bg-ink/80 px-2.5 py-1 text-[10px] font-medium uppercase text-paper">
-                  DEMO
+              <span
+                className={`rounded-full px-2.5 py-1 text-[10px] font-medium uppercase ${ORIGIN_BADGE_STYLES[dataOrigin]}`}
+              >
+                {DATA_ORIGIN_LABELS[dataOrigin]}
+              </span>
+              {stale && (
+                <span className="rounded-full border border-band-warn/40 bg-band-warn/10 px-2.5 py-1 text-[10px] font-medium uppercase text-band-warn">
+                  Zastaralá data — ověřte znovu
                 </span>
               )}
+              <span className="rounded-full border border-line px-2.5 py-1 text-[10px] font-medium uppercase text-muted">
+                {ANALYSIS_STAGE_LABELS[project.analysisStage as AnalysisStage] ?? project.analysisStage}
+              </span>
             </div>
             <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted">
               {project.portal && <span>{project.portal}</span>}
@@ -105,6 +140,13 @@ export function ProjectView({ project }: { project: ProjectDTO }) {
         </div>
       </Card>
 
+      <DuplicatesPanel
+        duplicates={[
+          ...project.duplicatesAsA.map((d) => ({ ...d, otherProject: d.projectB })),
+          ...project.duplicatesAsB.map((d) => ({ ...d, otherProject: d.projectA }))
+        ]}
+      />
+
       <ListingFields project={project} />
 
       <DataConfidencePanel
@@ -113,11 +155,18 @@ export function ProjectView({ project }: { project: ProjectDTO }) {
         hasRealBudgetItems={project.budgetItems.length > 0}
         renovationCostSet={Boolean(project.assumptions?.renovationCost && project.assumptions.renovationCost > 0)}
         salePriceSet={Boolean(project.assumptions?.saleBase)}
+        isStale={stale}
       />
+
+      <SourceEvidencePanel project={project} />
 
       <ComparablesTable projectId={project.id} comparables={project.comparables} />
 
+      {marketValue && arv && <MarketValuePanel marketValue={marketValue} arv={arv} />}
+
       <PriceDropWatch projectId={project.id} history={project.priceHistory} />
+
+      <ListingTimeline priceHistory={project.priceHistory} events={project.listingEvents} />
 
       <EconomicsSection
         projectId={project.id}
@@ -129,7 +178,11 @@ export function ProjectView({ project }: { project: ProjectDTO }) {
 
       <PhotosGallery projectId={project.id} photos={project.photos} />
 
+      <RoomConditionPanel projectId={project.id} conditions={project.roomConditions} />
+
       <BudgetSection projectId={project.id} items={project.budgetItems} />
+
+      <ProductRequirementsPanel projectId={project.id} requirements={project.productRequirements} />
 
       <ContactOutreach projectId={project.id} contact={project.contact} messages={project.outreachMessages} />
 

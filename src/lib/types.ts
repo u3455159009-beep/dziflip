@@ -69,7 +69,8 @@ export const LISTING_FIELDS = [
   "parking",
   "elevator",
   "orientation",
-  "legalNotes"
+  "legalNotes",
+  "description"
 ] as const;
 export type ListingField = (typeof LISTING_FIELDS)[number];
 
@@ -97,7 +98,8 @@ export const LISTING_FIELD_LABELS: Record<ListingField, string> = {
   parking: "Parkování",
   elevator: "Výtah",
   orientation: "Orientace",
-  legalNotes: "Právní / jiné důležité informace"
+  legalNotes: "Právní / jiné důležité informace",
+  description: "Popis nemovitosti"
 };
 
 export const BOOLEAN_FIELDS: ListingField[] = [
@@ -313,3 +315,174 @@ export const SMS_FEED_STATUS_LABELS: Record<SmsFeedStatus, string> = {
   MAKLER_ODPOVEDEL: "Makléř odpověděl",
   PROHLIDKA_NAVRZENA: "Prohlídka navržena"
 };
+
+// --- Phase 4: Real Data Engine, Comparable Engine V2, AI Photo Analysis ---
+
+export const ANALYSIS_STAGES = ["FOUND", "BASIC_ANALYSIS", "COMPARABLES", "PHOTO_ANALYSIS", "FULL_ANALYSIS"] as const;
+export type AnalysisStage = (typeof ANALYSIS_STAGES)[number];
+
+export const ANALYSIS_STAGE_LABELS: Record<AnalysisStage, string> = {
+  FOUND: "Nalezeno",
+  BASIC_ANALYSIS: "Základní analýza",
+  COMPARABLES: "Srovnatelné nemovitosti",
+  PHOTO_ANALYSIS: "Analýza fotografií",
+  FULL_ANALYSIS: "Kompletní analýza"
+};
+
+export const SOURCE_TYPES = ["DEMO", "MANUAL", "REAL"] as const;
+export type SourceType = (typeof SOURCE_TYPES)[number];
+
+export const SOURCE_TYPE_LABELS: Record<SourceType, string> = {
+  DEMO: "DEMO",
+  MANUAL: "Ruční zadání",
+  REAL: "Reálný zdroj"
+};
+
+export const DUPLICATE_CLASSIFICATIONS = ["SAME_PROPERTY", "POSSIBLE_DUPLICATE", "DIFFERENT"] as const;
+export type DuplicateClassification = (typeof DUPLICATE_CLASSIFICATIONS)[number];
+
+export const DUPLICATE_CLASSIFICATION_LABELS: Record<DuplicateClassification, string> = {
+  SAME_PROPERTY: "Stejná nemovitost",
+  POSSIBLE_DUPLICATE: "Možná duplicita",
+  DIFFERENT: "Odlišná nemovitost"
+};
+
+export const DUPLICATE_RESOLVED_STATUSES = ["PENDING", "CONFIRMED_SAME", "CONFIRMED_DIFFERENT"] as const;
+export type DuplicateResolvedStatus = (typeof DUPLICATE_RESOLVED_STATUSES)[number];
+
+export const LISTING_EVENT_TYPES = [
+  "CAPTURED",
+  "PRICE_CHANGE",
+  "DESCRIPTION_CHANGE",
+  "CONDITION_CHANGE",
+  "CONTACT_CHANGE",
+  "PHOTOS_CHANGED",
+  "STATUS_CHANGE"
+] as const;
+export type ListingEventType = (typeof LISTING_EVENT_TYPES)[number];
+
+export const LISTING_EVENT_TYPE_LABELS: Record<ListingEventType, string> = {
+  CAPTURED: "Zachyceno",
+  PRICE_CHANGE: "Změna ceny",
+  DESCRIPTION_CHANGE: "Změna popisu",
+  CONDITION_CHANGE: "Změna stavu",
+  CONTACT_CHANGE: "Změna kontaktu",
+  PHOTOS_CHANGED: "Změna fotografií",
+  STATUS_CHANGE: "Změna stavu nabídky"
+};
+
+export const COMP_QUALITY_TIERS = ["HIGH", "MEDIUM", "LOW"] as const;
+export type CompQualityTier = (typeof COMP_QUALITY_TIERS)[number];
+
+export const COMP_QUALITY_TIER_LABELS: Record<CompQualityTier, string> = {
+  HIGH: "Vysoká kvalita",
+  MEDIUM: "Střední kvalita",
+  LOW: "Nízká kvalita"
+};
+
+export const ROOM_TYPES = [
+  "KUCHYN",
+  "OBYVACI_POKOJ",
+  "LOZNICE",
+  "KOUPELNA",
+  "WC",
+  "CHODBA",
+  "BALKON",
+  "EXTERIER",
+  "NEZNAME"
+] as const;
+export type RoomType = (typeof ROOM_TYPES)[number];
+
+export const ROOM_TYPE_LABELS: Record<RoomType, string> = {
+  KUCHYN: "Kuchyň",
+  OBYVACI_POKOJ: "Obývací pokoj",
+  LOZNICE: "Ložnice",
+  KOUPELNA: "Koupelna",
+  WC: "WC",
+  CHODBA: "Chodba",
+  BALKON: "Balkon",
+  EXTERIER: "Exteriér",
+  NEZNAME: "Neznámé"
+};
+
+export const ROOM_CONDITION_ELEMENTS = [
+  "podlaha",
+  "steny",
+  "strop",
+  "elektro",
+  "svetla",
+  "dvere",
+  "okna",
+  "kuchyn",
+  "koupelna",
+  "sanita",
+  "nabytek"
+] as const;
+export type RoomConditionElement = (typeof ROOM_CONDITION_ELEMENTS)[number];
+
+export const ROOM_CONDITION_ELEMENT_LABELS: Record<RoomConditionElement, string> = {
+  podlaha: "Podlaha",
+  steny: "Stěny",
+  strop: "Strop",
+  elektro: "Elektro",
+  svetla: "Světla",
+  dvere: "Dveře",
+  okna: "Okna",
+  kuchyn: "Kuchyň",
+  koupelna: "Koupelna",
+  sanita: "Sanita",
+  nabytek: "Nábytek"
+};
+
+export const ROOM_CONDITION_STATUSES = ["KEEP", "COSMETIC", "REPLACE", "FULL_RENOVATION", "UNKNOWN"] as const;
+export type RoomConditionStatus = (typeof ROOM_CONDITION_STATUSES)[number];
+
+export const ROOM_CONDITION_STATUS_LABELS: Record<RoomConditionStatus, string> = {
+  KEEP: "Zachovat",
+  COSMETIC: "Kosmetická úprava",
+  REPLACE: "Vyměnit",
+  FULL_RENOVATION: "Kompletní rekonstrukce",
+  UNKNOWN: "Neznámé"
+};
+
+export const DATA_SOURCE_KINDS = ["MANUAL", "AI_VISION", "PROVIDER"] as const;
+export type DataSourceKind = (typeof DATA_SOURCE_KINDS)[number];
+
+export const PHOTO_GENERATION_STATUSES = ["NOT_CONFIGURED", "PENDING", "GENERATED", "FAILED"] as const;
+export type PhotoGenerationStatus = (typeof PHOTO_GENERATION_STATUSES)[number];
+
+export const PHOTO_GENERATION_STYLES = [
+  "LEVNY_FLIP",
+  "MODERNI",
+  "PREMIUM",
+  "MINIMALISTICKY",
+  "SCANDI",
+  "LUXURY",
+  "CUSTOM"
+] as const;
+export type PhotoGenerationStyle = (typeof PHOTO_GENERATION_STYLES)[number];
+
+export const PHOTO_GENERATION_STYLE_LABELS: Record<PhotoGenerationStyle, string> = {
+  LEVNY_FLIP: "Levný flip",
+  MODERNI: "Moderní",
+  PREMIUM: "Premium",
+  MINIMALISTICKY: "Minimalistický",
+  SCANDI: "Scandi",
+  LUXURY: "Luxury",
+  CUSTOM: "Vlastní"
+};
+
+export const PRODUCT_REQUIREMENT_STATUSES = ["NEEDED", "MATCHED", "ORDERED", "SKIPPED"] as const;
+export type ProductRequirementStatus = (typeof PRODUCT_REQUIREMENT_STATUSES)[number];
+
+export const PRODUCT_REQUIREMENT_STATUS_LABELS: Record<ProductRequirementStatus, string> = {
+  NEEDED: "Potřeba",
+  MATCHED: "Nalezen produkt",
+  ORDERED: "Objednáno",
+  SKIPPED: "Přeskočeno"
+};
+
+// Deal Score V2 — when critical inputs are missing/low-confidence, the
+// colored band must not be shown as a confident verdict.
+export const DEAL_SCORE_CONFIDENCE = ["HIGH", "LOW_DATA"] as const;
+export type DealScoreConfidence = (typeof DEAL_SCORE_CONFIDENCE)[number];

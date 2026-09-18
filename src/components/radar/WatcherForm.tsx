@@ -1,8 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button, Input, Select } from "@/components/ui";
 import type { WatcherDTO } from "@/lib/watcher-types";
+
+interface SourceProviderInfo {
+  key: string;
+  label: string;
+  status: "ACTIVE" | "PENDING_ACCESS";
+  statusNote: string | null;
+}
 
 const DISPOSITION_OPTIONS = ["1+kk", "1+1", "2+kk", "2+1", "3+kk", "3+1", "4+kk", "4+1"];
 
@@ -103,6 +110,14 @@ export function WatcherForm({
 }) {
   const [values, setValues] = useState<WatcherFormValues>(initial ?? EMPTY);
   const [saving, setSaving] = useState(false);
+  const [providers, setProviders] = useState<SourceProviderInfo[]>([]);
+
+  useEffect(() => {
+    fetch("/api/sources")
+      .then((r) => r.json())
+      .then(setProviders)
+      .catch(() => {});
+  }, []);
 
   function set<K extends keyof WatcherFormValues>(key: K, v: WatcherFormValues[K]) {
     setValues((prev) => ({ ...prev, [key]: v }));
@@ -196,14 +211,21 @@ export function WatcherForm({
       <div>
         <span className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-muted">Zdroje dat</span>
         <div className="flex flex-wrap gap-3">
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={values.sources.includes("MOCK_DEMO")} onChange={() => toggleSource("MOCK_DEMO")} />
-            DEMO ukázková data <span className="text-band-good">(aktivní)</span>
-          </label>
-          <label className="flex items-center gap-2 text-sm text-muted">
-            <input type="checkbox" checked={values.sources.includes("SREALITY")} onChange={() => toggleSource("SREALITY")} />
-            Sreality.cz <span className="text-band-normal">(čeká na povolený přístup)</span>
-          </label>
+          {providers.map((p) => (
+            <label
+              key={p.key}
+              className={`flex items-center gap-2 text-sm ${p.status === "PENDING_ACCESS" ? "text-muted" : ""}`}
+              title={p.statusNote ?? undefined}
+            >
+              <input type="checkbox" checked={values.sources.includes(p.key)} onChange={() => toggleSource(p.key)} />
+              {p.label}{" "}
+              {p.status === "ACTIVE" ? (
+                <span className="text-band-good">(aktivní)</span>
+              ) : (
+                <span className="text-band-normal">(čeká na povolený přístup)</span>
+              )}
+            </label>
+          ))}
         </div>
       </div>
 

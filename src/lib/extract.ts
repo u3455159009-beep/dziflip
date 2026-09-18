@@ -27,6 +27,9 @@ export interface ExtractedListing {
     elevator: boolean;
     orientation: string;
     legalNotes: string;
+    description: string;
+    latitude: number;
+    longitude: number;
   }>;
   meta: FieldMeta;
   fullText: string;
@@ -271,6 +274,40 @@ export function extractFromHtml(html: string, sourceUrl: string): ExtractedListi
     result.fields.title = ogTitle.trim();
     result.meta.title = "VERIFIED";
   }
+
+  const ogDescription = $('meta[property="og:description"]').attr("content") || $('meta[name="description"]').attr("content");
+  if (ogDescription && ogDescription.trim().length > 10) {
+    result.fields.description = ogDescription.trim();
+    result.meta.description = "VERIFIED";
+  }
+
+  // JSON-LD structured data — real, site-published data, never geocoded or
+  // guessed. Only used when the site itself embeds valid coordinates.
+  $('script[type="application/ld+json"]').each((_, el) => {
+    try {
+      const parsed = JSON.parse($(el).contents().text());
+      const candidates = Array.isArray(parsed) ? parsed : [parsed];
+      for (const node of candidates) {
+        const geo = node?.geo || node?.address?.geo;
+        const lat = Number(geo?.latitude);
+        const lng = Number(geo?.longitude);
+        if (Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180) {
+          // Not tracked in fieldMeta (latitude/longitude aren't manually
+          // editable ListingFields) — a non-null value here is by
+          // construction verified, since we only ever copy it from the
+          // site's own structured data.
+          result.fields.latitude = lat;
+          result.fields.longitude = lng;
+        }
+        if (!result.fields.description && typeof node?.description === "string" && node.description.trim().length > 10) {
+          result.fields.description = node.description.trim();
+          result.meta.description = "VERIFIED";
+        }
+      }
+    } catch {
+      /* ignore malformed JSON-LD */
+    }
+  });
 
   // Collect candidate photo URLs
   const urls = new Set<string>();

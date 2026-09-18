@@ -1,22 +1,31 @@
 import { prisma } from "@/lib/prisma";
 import { buildDealFeedItem } from "@/lib/dealFeed";
+import { getSettings } from "@/lib/settings";
+import type { CompQualityTier } from "@/lib/types";
 import { FeedManager } from "@/components/deal/FeedManager";
 
 export const dynamic = "force-dynamic";
 
 export default async function FeedPage() {
+  const settings = await getSettings();
   const projects = await prisma.project.findMany({
+    where: settings.showDemoData ? undefined : { isDemo: false },
     orderBy: { createdAt: "desc" },
     include: {
       photos: { take: 1, orderBy: { sortOrder: "asc" } },
-      comparables: { select: { pricePerM2: true } },
+      comparables: { select: { pricePerM2: true, qualityTier: true, priceType: true, condition: true } },
       budgetItems: { select: { id: true } },
       assumptions: true,
       smsMessages: { select: { status: true, direction: true, classification: true } }
     }
   });
 
-  const items = projects.map((p) => buildDealFeedItem(p as any));
+  const opts = {
+    minCompCount: settings.minCompCount,
+    minCompQuality: settings.minCompQuality as CompQualityTier,
+    staleDataThresholdDays: settings.staleDataThresholdDays
+  };
+  const items = projects.map((p) => buildDealFeedItem(p as any, opts));
 
   return (
     <div>

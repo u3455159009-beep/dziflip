@@ -1,14 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSettings, updateSettings } from "@/lib/settings";
+import { COMP_QUALITY_TIERS } from "@/lib/types";
 
 export async function GET() {
   const settings = await getSettings();
   return NextResponse.json(settings);
 }
 
-const NUMERIC_FIELDS = ["defaultMinProfit", "defaultMinRoiPct", "defaultReserve", "defaultRenovationCostPerM2"];
-const INT_FIELDS = ["dailyContactLimit", "maxAutoSmsPerDay"];
-const BOOL_FIELDS = ["notifyInApp", "notifyEmail", "smsAutoReplyEnabled"];
+const NUMERIC_FIELDS = ["defaultMinProfit", "defaultMinRoiPct", "defaultReserve", "defaultRenovationCostPerM2", "maxCompDistanceKm"];
+const INT_FIELDS = ["dailyContactLimit", "maxAutoSmsPerDay", "minCompCount", "maxCompAgeDays", "staleDataThresholdDays"];
+const BOOL_FIELDS = ["notifyInApp", "notifyEmail", "smsAutoReplyEnabled", "showDemoData", "aiPhotoAnalysisEnabled"];
 const STRING_FIELDS = ["notifyEmailAddress", "defaultTemplateId", "defaultSmsTemplateId"];
 
 export async function PATCH(req: NextRequest) {
@@ -22,6 +23,9 @@ export async function PATCH(req: NextRequest) {
     if (key in body) data[key] = body[key] === null || body[key] === "" ? null : Number(body[key]);
   for (const key of INT_FIELDS)
     if (key in body) data[key] = body[key] === null || body[key] === "" ? null : Math.round(Number(body[key]));
+  if ("minCompQuality" in body && COMP_QUALITY_TIERS.includes(body.minCompQuality)) {
+    data.minCompQuality = body.minCompQuality;
+  }
 
   if ("preferredLocalities" in body) {
     data.preferredLocalities = Array.isArray(body.preferredLocalities)

@@ -5,18 +5,10 @@
 // source (an official partner API, a licensed data feed, or the user's own
 // manually-approved export) is available. Deal Radar skips it and reports
 // why instead of silently returning nothing or fabricating results.
-import type { ListingSourceProvider } from "./types";
-import { SourceNotAvailableError } from "./types";
+import { createPendingAccessProvider } from "./pendingProvider";
 
-export const srealityProvider: ListingSourceProvider = {
-  key: "SREALITY",
-  label: "Sreality.cz",
-  status: "PENDING_ACCESS",
-  statusNote:
-    "Čeká na povolený datový zdroj (např. oficiální API nebo licencovaný feed). Aplikace neobchází CAPTCHA ani anti-bot ochranu portálu.",
-  async search() {
-    throw new SourceNotAvailableError(
-      "Sreality.cz zatím nemá povolený/stabilní datový přístup — integrace čeká na schválený zdroj dat."
-    );
-  }
-};
+export const srealityProvider = createPendingAccessProvider(
+  "SREALITY",
+  "Sreality.cz",
+  "Čeká na povolený datový zdroj (např. oficiální API nebo licencovaný feed). Aplikace neobchází CAPTCHA ani anti-bot ochranu portálu."
+);

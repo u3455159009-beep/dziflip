@@ -158,6 +158,9 @@ export function WatcherCard({
             <span>Aktualizace: {runResult.updatedProjects}</span>
             <span>Pokles ceny: {runResult.priceDrops}</span>
             <span>Alerty: {runResult.alerts}</span>
+            {runResult.itemErrors > 0 && (
+              <span className="text-band-bad">Chyby při zpracování: {runResult.itemErrors}</span>
+            )}
           </div>
           <div className="space-y-1 text-xs text-muted">
             {runResult.providers.map((p) => (

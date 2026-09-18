@@ -1,10 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { Button, Card, Input, SectionTitle, Select } from "@/components/ui";
 import { formatCZK, formatDate, formatNumber } from "@/lib/format";
 import { computeComparableStats } from "@/lib/calc";
-import { PRICE_TYPE_LABELS, PRICE_TYPES } from "@/lib/types";
+import { PRICE_TYPE_LABELS, PRICE_TYPES, COMP_QUALITY_TIER_LABELS, type CompQualityTier } from "@/lib/types";
 import type { ComparableDTO } from "@/lib/project-types";
 
 const emptyForm = {
@@ -17,8 +17,57 @@ const emptyForm = {
   price: "",
   condition: "",
   distanceKm: "",
-  priceType: "ASKING" as string
+  priceType: "ASKING" as string,
+  ownership: "",
+  floor: "",
+  totalFloors: "",
+  elevator: "",
+  balcony: "",
+  terrace: "",
+  loggia: "",
+  parking: "",
+  buildingType: "",
+  construction: ""
 };
+
+const DIMENSION_LABELS: Record<string, string> = {
+  locality: "lokalita",
+  distance: "vzdálenost",
+  disposition: "dispozice",
+  area: "plocha",
+  condition: "stav",
+  buildingType: "typ domu",
+  ownership: "vlastnictví",
+  floor: "patro",
+  elevator: "výtah",
+  amenities: "balkon/terasa/lodžie",
+  parking: "parkování",
+  recency: "stáří nabídky"
+};
+
+const QUALITY_TIER_STYLES: Record<string, string> = {
+  HIGH: "bg-band-good/10 text-band-good",
+  MEDIUM: "bg-band-warn/10 text-band-warn",
+  LOW: "bg-band-bad/10 text-band-bad"
+};
+
+function BoolSelect({
+  label,
+  value,
+  onChange
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <Select label={label} value={value} onChange={(e) => onChange(e.target.value)}>
+      <option value="">Neznámé</option>
+      <option value="true">Ano</option>
+      <option value="false">Ne</option>
+    </Select>
+  );
+}
 
 export function ComparablesTable({
   projectId,
@@ -31,6 +80,7 @@ export function ComparablesTable({
   const [form, setForm] = useState(emptyForm);
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [expanded, setExpanded] = useState<string | null>(null);
 
   const stats = useMemo(
     () => computeComparableStats(comparables.map((c) => c.pricePerM2 ?? NaN)),
@@ -48,7 +98,12 @@ export function ComparablesTable({
           ...form,
           areaM2: form.areaM2 || null,
           price: form.price || null,
-          distanceKm: form.distanceKm || null
+          distanceKm: form.distanceKm || null,
+          elevator: form.elevator === "" ? undefined : form.elevator === "true",
+          balcony: form.balcony === "" ? undefined : form.balcony === "true",
+          terrace: form.terrace === "" ? undefined : form.terrace === "true",
+          loggia: form.loggia === "" ? undefined : form.loggia === "true",
+          parking: form.parking === "" ? undefined : form.parking === "true"
         })
       });
       if (res.ok) {
@@ -96,6 +151,16 @@ export function ComparablesTable({
               </option>
             ))}
           </Select>
+          <Input label="Vlastnictví" value={form.ownership} onChange={(e) => setForm((f) => ({ ...f, ownership: e.target.value }))} />
+          <Input label="Patro" value={form.floor} onChange={(e) => setForm((f) => ({ ...f, floor: e.target.value }))} />
+          <Input label="Počet podlaží" value={form.totalFloors} onChange={(e) => setForm((f) => ({ ...f, totalFloors: e.target.value }))} />
+          <Input label="Typ domu" value={form.buildingType} onChange={(e) => setForm((f) => ({ ...f, buildingType: e.target.value }))} />
+          <Input label="Konstrukce" value={form.construction} onChange={(e) => setForm((f) => ({ ...f, construction: e.target.value }))} />
+          <BoolSelect label="Výtah" value={form.elevator} onChange={(v) => setForm((f) => ({ ...f, elevator: v }))} />
+          <BoolSelect label="Balkon" value={form.balcony} onChange={(v) => setForm((f) => ({ ...f, balcony: v }))} />
+          <BoolSelect label="Terasa" value={form.terrace} onChange={(v) => setForm((f) => ({ ...f, terrace: v }))} />
+          <BoolSelect label="Lodžie" value={form.loggia} onChange={(v) => setForm((f) => ({ ...f, loggia: v }))} />
+          <BoolSelect label="Parkování" value={form.parking} onChange={(v) => setForm((f) => ({ ...f, parking: v }))} />
           <div className="col-span-full flex justify-end">
             <Button onClick={addComparable} disabled={saving}>
               {saving ? "Ukládám…" : "Uložit srovnání"}
@@ -105,7 +170,7 @@ export function ComparablesTable({
       )}
 
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[820px] text-sm">
+        <table className="w-full min-w-[900px] text-sm">
           <thead>
             <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-muted">
               <th className="py-2 pr-3">Nemovitost</th>
@@ -117,6 +182,7 @@ export function ComparablesTable({
               <th className="py-2 pr-3">Stav</th>
               <th className="py-2 pr-3 text-right">Vzdálenost</th>
               <th className="py-2 pr-3">Typ ceny</th>
+              <th className="py-2 pr-3">Podobnost</th>
               <th className="py-2 pr-3">Zdroj</th>
               <th className="py-2"></th>
             </tr>
@@ -124,38 +190,73 @@ export function ComparablesTable({
           <tbody>
             {comparables.length === 0 && (
               <tr>
-                <td colSpan={11} className="py-6 text-center text-sm text-muted">
+                <td colSpan={12} className="py-6 text-center text-sm text-muted">
                   Zatím žádná srovnání. Přidejte srovnatelné nabídky ručně.
                 </td>
               </tr>
             )}
-            {comparables.map((c) => (
-              <tr key={c.id} className="border-b border-line/60 number-tabular">
-                <td className="py-2.5 pr-3 max-w-[220px] truncate">{c.title || "—"}</td>
-                <td className="py-2.5 pr-3">{c.locality || "—"}</td>
-                <td className="py-2.5 pr-3">{c.disposition || "—"}</td>
-                <td className="py-2.5 pr-3 text-right">{formatNumber(c.areaM2)}</td>
-                <td className="py-2.5 pr-3 text-right">{formatCZK(c.price)}</td>
-                <td className="py-2.5 pr-3 text-right">{formatCZK(c.pricePerM2)}</td>
-                <td className="py-2.5 pr-3">{c.condition || "—"}</td>
-                <td className="py-2.5 pr-3 text-right">{c.distanceKm ? `${formatNumber(c.distanceKm, 1)} km` : "—"}</td>
-                <td className="py-2.5 pr-3 text-xs">{PRICE_TYPE_LABELS[c.priceType as keyof typeof PRICE_TYPE_LABELS] ?? c.priceType}</td>
-                <td className="py-2.5 pr-3">
-                  {c.url ? (
-                    <a href={c.url} target="_blank" rel="noreferrer" className="text-beige-500 underline underline-offset-2">
-                      {c.portal || "odkaz"}
-                    </a>
-                  ) : (
-                    c.portal || "—"
+            {comparables.map((c) => {
+              const tier = c.qualityTier as CompQualityTier | null;
+              const breakdown = c.similarityBreakdown ? safeParse(c.similarityBreakdown) : null;
+              const isExpanded = expanded === c.id;
+              return (
+                <Fragment key={c.id}>
+                  <tr className="border-b border-line/60 number-tabular">
+                    <td className="py-2.5 pr-3 max-w-[220px] truncate">{c.title || "—"}</td>
+                    <td className="py-2.5 pr-3">{c.locality || "—"}</td>
+                    <td className="py-2.5 pr-3">{c.disposition || "—"}</td>
+                    <td className="py-2.5 pr-3 text-right">{formatNumber(c.areaM2)}</td>
+                    <td className="py-2.5 pr-3 text-right">{formatCZK(c.price)}</td>
+                    <td className="py-2.5 pr-3 text-right">{formatCZK(c.pricePerM2)}</td>
+                    <td className="py-2.5 pr-3">{c.condition || "—"}</td>
+                    <td className="py-2.5 pr-3 text-right">{c.distanceKm ? `${formatNumber(c.distanceKm, 1)} km` : "—"}</td>
+                    <td className="py-2.5 pr-3 text-xs">{PRICE_TYPE_LABELS[c.priceType as keyof typeof PRICE_TYPE_LABELS] ?? c.priceType}</td>
+                    <td className="py-2.5 pr-3">
+                      {tier ? (
+                        <button
+                          onClick={() => setExpanded(isExpanded ? null : c.id)}
+                          className={`rounded-full px-2 py-0.5 text-xs font-medium ${QUALITY_TIER_STYLES[tier] ?? ""}`}
+                        >
+                          {c.similarityScore != null ? `${Math.round(c.similarityScore * 100)} %` : "—"} · {COMP_QUALITY_TIER_LABELS[tier]}
+                        </button>
+                      ) : (
+                        <span className="text-xs text-muted">—</span>
+                      )}
+                    </td>
+                    <td className="py-2.5 pr-3">
+                      {c.url ? (
+                        <a href={c.url} target="_blank" rel="noreferrer" className="text-beige-500 underline underline-offset-2">
+                          {c.portal || "odkaz"}
+                        </a>
+                      ) : (
+                        c.portal || "—"
+                      )}
+                    </td>
+                    <td className="py-2.5 text-right">
+                      <button onClick={() => remove(c.id)} className="text-xs text-muted hover:text-band-bad">
+                        smazat
+                      </button>
+                    </td>
+                  </tr>
+                  {isExpanded && breakdown && (
+                    <tr className="border-b border-line/60 bg-beige-50">
+                      <td colSpan={12} className="px-3 py-3">
+                        <div className="text-xs font-medium uppercase tracking-wide text-muted">
+                          Proč je tato nemovitost srovnatelná
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {Object.entries(breakdown).map(([key, value]) => (
+                            <span key={key} className="rounded-full bg-white px-2.5 py-1 text-xs text-ink shadow-sm">
+                              {DIMENSION_LABELS[key] ?? key}: {Math.round((value as number) * 100)} %
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
                   )}
-                </td>
-                <td className="py-2.5 text-right">
-                  <button onClick={() => remove(c.id)} className="text-xs text-muted hover:text-band-bad">
-                    smazat
-                  </button>
-                </td>
-              </tr>
-            ))}
+                </Fragment>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -171,6 +272,14 @@ export function ComparablesTable({
       </div>
     </Card>
   );
+}
+
+function safeParse(json: string): Record<string, number> | null {
+  try {
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
 }
 
 function Stat({ label, value }: { label: string; value: string }) {

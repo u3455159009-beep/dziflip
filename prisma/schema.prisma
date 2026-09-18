@@ -25,6 +25,18 @@ datasource db {
 // SmsClassification: NABIZI_PROHLIDKU | CHCE_ZAVOLAT | NEMOVITOST_PRODANA | NEMA_ZAJEM | CHCE_DALSI_INFORMACE | JINE | UNKNOWN
 // SmsAutomationMode: OFF | DRAFT | AUTO
 // MessageTemplateChannel: EMAIL | SMS
+// AnalysisStage: FOUND | BASIC_ANALYSIS | COMPARABLES | PHOTO_ANALYSIS | FULL_ANALYSIS
+// SourceType (computed, not stored): DEMO | MANUAL | REAL
+// DuplicateClassification: SAME_PROPERTY | POSSIBLE_DUPLICATE | DIFFERENT
+// DuplicateResolvedStatus: PENDING | CONFIRMED_SAME | CONFIRMED_DIFFERENT
+// ListingEventType: CAPTURED | PRICE_CHANGE | DESCRIPTION_CHANGE | CONDITION_CHANGE | CONTACT_CHANGE | PHOTOS_CHANGED | STATUS_CHANGE
+// CompQualityTier: HIGH | MEDIUM | LOW
+// RoomType: KUCHYN | OBYVACI_POKOJ | LOZNICE | KOUPELNA | WC | CHODBA | BALKON | EXTERIER | NEZNAME
+// RoomConditionStatus: KEEP | COSMETIC | REPLACE | FULL_RENOVATION | UNKNOWN
+// DataSourceKind: MANUAL | AI_VISION | PROVIDER
+// PhotoGenerationStatus: NOT_CONFIGURED | PENDING | GENERATED | FAILED
+// PhotoGenerationStyle: LEVNY_FLIP | MODERNI | PREMIUM | MINIMALISTICKY | SCANDI | LUXURY | CUSTOM
+// ProductRequirementStatus: NEEDED | MATCHED | ORDERED | SKIPPED
 
 model Project {
   id        String   @id @default(cuid())
@@ -63,29 +75,47 @@ model Project {
   orientation       String?
   legalNotes        String?
   fullText          String?
+  description       String? // cleaned listing description, when separable from fullText
+  latitude          Float? // only ever set from real structured source data (e.g. JSON-LD), never guessed
+  longitude         Float?
 
   // JSON map of fieldName -> DataConfidence, stored as string
-  fieldMeta String?
+  fieldMeta   String?
+  // JSON map of fieldName -> human-readable source label (e.g. "Sreality.cz", "ruční zadání", "AI Vision")
+  fieldSource String?
 
   // My own targets
   targetPrice Float?
+
+  // Real Data Engine timestamps
+  publishedAt     DateTime? // when the source portal published the listing, if known
+  firstSeenAt     DateTime  @default(now()) // when DziFlip first captured this listing
+  lastSeenAt      DateTime  @default(now()) // last time a provider/re-scan confirmed the listing still exists
+  sourceUpdatedAt DateTime? // when the source portal says it was last updated, if known
+  lastVerifiedAt  DateTime? // last time critical fields (price/area) were reconfirmed against the source
 
   // Deal Radar / dedup
   externalId      String? // stable id from a source provider, used for dedup
   isDemo          Boolean  @default(false) // true when created from the MOCK_DEMO provider — never real data
   sourceWatcherId String?
   sourceWatcher   Watcher? @relation(fields: [sourceWatcherId], references: [id], onDelete: SetNull)
+  analysisStage   String   @default("FULL_ANALYSIS") // FOUND | BASIC_ANALYSIS | COMPARABLES | PHOTO_ANALYSIS | FULL_ANALYSIS
 
-  photos           Photo[]
-  comparables      Comparable[]
-  budgetItems      BudgetItem[]
-  assumptions      Assumptions?
-  priceHistory     PriceHistory[]
-  contact          Contact?
-  outreachMessages OutreachMessage[]
-  alerts           Alert[]
-  smsMessages      SmsMessage[]
-  smsAuditLogs     SmsAuditLog[]
+  photos              Photo[]
+  comparables         Comparable[]
+  budgetItems         BudgetItem[]
+  assumptions         Assumptions?
+  priceHistory        PriceHistory[]
+  contact             Contact?
+  outreachMessages    OutreachMessage[]
+  alerts              Alert[]
+  smsMessages         SmsMessage[]
+  smsAuditLogs        SmsAuditLog[]
+  listingEvents       ListingEvent[]
+  roomConditions      RoomCondition[]
+  productRequirements ProductRequirement[]
+  duplicatesAsA       PossibleDuplicate[]  @relation("DuplicateA")
+  duplicatesAsB       PossibleDuplicate[]  @relation("DuplicateB")
 
   @@unique([portal, externalId])
 }
@@ -228,6 +258,15 @@ model Settings {
   smsAutoReplyEnabled      Boolean   @default(false)
   defaultSmsTemplateId     String?
 
+  // Real Data Engine (Phase 4)
+  showDemoData           Boolean @default(true) // false = hide isDemo projects everywhere
+  minCompCount           Int     @default(3)
+  minCompQuality         String  @default("MEDIUM") // HIGH | MEDIUM | LOW — minimum tier counted toward market value
+  maxCompDistanceKm      Float   @default(2)
+  maxCompAgeDays         Int     @default(180)
+  aiPhotoAnalysisEnabled Boolean @default(false)
+  staleDataThresholdDays Int     @default(14)
+
   updatedAt DateTime @updatedAt
 }
 
@@ -313,6 +352,34 @@ model Photo {
   notes     String?
   sortOrder Int      @default(0)
   createdAt DateTime @default(now())
+
+  // AI Photo Analysis (Vision provider architecture) — fillable manually
+  // today, by a real Vision provider later; analysisSource always says which.
+  roomType              String? // KUCHYN | OBYVACI_POKOJ | LOZNICE | KOUPELNA | WC | CHODBA | BALKON | EXTERIER | NEZNAME
+  currentCondition      String?
+  visibleIssues         String? // JSON array of strings
+  keepNotes             String?
+  removeNotes           String?
+  replaceNotes          String?
+  renovationSuggestions String?
+  analysisConfidence    String? // HIGH | MEDIUM | LOW | UNKNOWN
+  analysisSource        String    @default("MANUAL") // MANUAL | AI_VISION
+  analyzedAt            DateTime?
+
+  generations PhotoGeneration[]
+}
+
+model PhotoGeneration {
+  id           String    @id @default(cuid())
+  photoId      String
+  photo        Photo     @relation(fields: [photoId], references: [id], onDelete: Cascade)
+  style        String // LEVNY_FLIP | MODERNI | PREMIUM | MINIMALISTICKY | SCANDI | LUXURY | CUSTOM
+  prompt       String?
+  generatedUrl String?
+  model        String?
+  status       String    @default("NOT_CONFIGURED") // NOT_CONFIGURED | PENDING | GENERATED | FAILED
+  createdAt    DateTime  @default(now())
+  generatedAt  DateTime?
 }
 
 model Comparable {
@@ -332,6 +399,22 @@ model Comparable {
   priceType   String   @default("ASKING")
   foundAt     DateTime @default(now())
   createdAt   DateTime @default(now())
+
+  // Comparable Engine V2 — additional fields used for similarity scoring
+  ownership    String?
+  floor        String?
+  totalFloors  String?
+  elevator     Boolean?
+  balcony      Boolean?
+  terrace      Boolean?
+  loggia       Boolean?
+  parking      Boolean?
+  buildingType String?
+  construction String?
+
+  similarityScore     Float? // 0-1, cached — see src/lib/comparableEngine.ts for the formula
+  similarityBreakdown String? // JSON: { locality, area, disposition, condition, ... } each 0-1
+  qualityTier         String? // HIGH | MEDIUM | LOW
 }
 
 model BudgetItem {
@@ -353,6 +436,80 @@ model BudgetItem {
   verifiedAt       DateTime?
   createdAt        DateTime  @default(now())
   sortOrder        Int       @default(0)
+}
+
+// Generalized listing history beyond price (Real Data Engine, item 4).
+model ListingEvent {
+  id         String   @id @default(cuid())
+  projectId  String
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  eventType  String // CAPTURED | PRICE_CHANGE | DESCRIPTION_CHANGE | CONDITION_CHANGE | CONTACT_CHANGE | PHOTOS_CHANGED | STATUS_CHANGE
+  detail     String?
+  oldValue   String?
+  newValue   String?
+  occurredAt DateTime @default(now())
+}
+
+// Duplicate detection between two projects — never auto-merged.
+model PossibleDuplicate {
+  id             String    @id @default(cuid())
+  projectAId     String
+  projectA       Project   @relation("DuplicateA", fields: [projectAId], references: [id], onDelete: Cascade)
+  projectBId     String
+  projectB       Project   @relation("DuplicateB", fields: [projectBId], references: [id], onDelete: Cascade)
+  matchScore     Float // 0-1
+  classification String // SAME_PROPERTY | POSSIBLE_DUPLICATE | DIFFERENT
+  reasons        String // JSON array of human-readable match reasons
+  resolvedStatus String    @default("PENDING") // PENDING | CONFIRMED_SAME | CONFIRMED_DIFFERENT
+  createdAt      DateTime  @default(now())
+  resolvedAt     DateTime?
+
+  @@unique([projectAId, projectBId])
+}
+
+// Renovation Condition Score — structured per-room-element assessment,
+// manually entered today, AI-fillable later (source distinguishes them).
+model RoomCondition {
+  id        String   @id @default(cuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  room      String
+  element   String // podlaha | steny | strop | elektro | svetla | dvere | okna | kuchyn | koupelna | sanita | nabytek
+  status    String   @default("UNKNOWN") // KEEP | COSMETIC | REPLACE | FULL_RENOVATION | UNKNOWN
+  notes     String?
+  source    String   @default("MANUAL") // MANUAL | AI_VISION
+  updatedAt DateTime @updatedAt
+
+  @@unique([projectId, room, element])
+}
+
+// Product matching preparation (item 16) — no real product search yet.
+model ProductRequirement {
+  id          String   @id @default(cuid())
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  room        String?
+  category    String
+  description String
+  budgetMin   Float?
+  budgetMax   Float?
+  dimensions  String?
+  style       String?
+  quantity    Int      @default(1)
+  status      String   @default("NEEDED") // NEEDED | MATCHED | ORDERED | SKIPPED
+  createdAt   DateTime @default(now())
+}
+
+// Provider/pipeline error isolation (item 22) — one bad listing or provider
+// must never take down the whole Deal Radar run.
+model ProviderErrorLog {
+  id           String   @id @default(cuid())
+  provider     String
+  watcherId    String?
+  externalId   String?
+  errorMessage String
+  retryStatus  String   @default("NONE") // NONE | RETRIED | GAVE_UP
+  occurredAt   DateTime @default(now())
 }
 
 model Assumptions {

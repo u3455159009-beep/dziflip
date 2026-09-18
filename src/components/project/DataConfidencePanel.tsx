@@ -16,20 +16,23 @@ export function DataConfidencePanel({
   comparablesCount,
   hasRealBudgetItems,
   renovationCostSet,
-  salePriceSet
+  salePriceSet,
+  isStale
 }: {
   fieldMeta: FieldMeta;
   comparablesCount: number;
   hasRealBudgetItems: boolean;
   renovationCostSet: boolean;
   salePriceSet: boolean;
+  isStale?: boolean;
 }) {
   const result = computeDataConfidence({
     fieldMeta,
     comparablesCount,
     hasRealBudgetItems,
     renovationCostSet,
-    salePriceSet
+    salePriceSet,
+    isStale
   });
 
   return (

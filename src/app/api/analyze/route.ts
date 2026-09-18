@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { extractFromText, detectPortal, type ExtractedListing } from "@/lib/extract";
+import { extractFromText, extractContactInfo, detectPortal, type ExtractedListing } from "@/lib/extract";
 import { fetchListing } from "@/lib/fetchListing";
 import { DEFAULT_ASSUMPTIONS } from "@/lib/calc";
+import { serializeFieldMeta, serializeFieldSource } from "@/lib/listing/fieldMeta";
+import { LISTING_FIELDS, type ListingField } from "@/lib/types";
+import { findPossibleDuplicates } from "@/lib/dedup";
 
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
@@ -51,14 +54,40 @@ export async function POST(req: NextRequest) {
     extracted = extractFromText(text!, undefined);
   }
 
+  // "MANUAL TEXT" vs "MANUAL URL" provenance (Real Data Engine, item 1/17):
+  // a pure text paste has no portal, so it's labeled distinctly from a URL
+  // fetch (even one from an unrecognized domain, which still carries a
+  // hostname-derived portal label from detectPortal()).
+  const portal = extracted.portal ?? (url ? null : "Ruční text");
+  const sourceLabel = url ? portal ?? "Ruční URL" : "Ruční text";
+
+  // fieldMeta (confidence) already comes straight from extraction — only
+  // the source label needs deriving here, one per field that actually got
+  // a value, regardless of its confidence level.
+  const fieldMeta = { ...extracted.meta };
+  const fieldSource: Partial<Record<ListingField, string>> = {};
+  for (const key of LISTING_FIELDS) {
+    if (extracted.meta[key]) fieldSource[key] = sourceLabel;
+  }
+
+  const contact = extractContactInfo(extracted.fullText || text || "");
+
   const project = await prisma.project.create({
     data: {
       status: "ACTIVE",
       sourceUrl: url || null,
       sourceText: text || null,
-      portal: extracted.portal,
+      portal,
       fullText: extracted.fullText || text || null,
-      fieldMeta: JSON.stringify(extracted.meta),
+      description: extracted.fields.description ?? null,
+      latitude: extracted.fields.latitude ?? null,
+      longitude: extracted.fields.longitude ?? null,
+      fieldMeta: serializeFieldMeta(fieldMeta),
+      fieldSource: serializeFieldSource(fieldSource),
+      analysisStage: "FULL_ANALYSIS",
+      firstSeenAt: new Date(),
+      lastSeenAt: new Date(),
+      lastVerifiedAt: new Date(),
       title: extracted.fields.title,
       askingPrice: extracted.fields.askingPrice,
       disposition: extracted.fields.disposition,
@@ -86,6 +115,10 @@ export async function POST(req: NextRequest) {
       photos: {
         create: fetchedPhotos.map((u, i) => ({ url: u, sortOrder: i }))
       },
+      contact: contact.phone || contact.email ? { create: { phone: contact.phone ?? null, email: contact.email ?? null } } : undefined,
+      listingEvents: {
+        create: [{ eventType: "CAPTURED", detail: "Nemovitost analyzována a uložena." }]
+      },
       assumptions: {
         create: {
           purchasePriceUsed: extracted.fields.askingPrice ?? null,
@@ -108,5 +141,7 @@ export async function POST(req: NextRequest) {
     }
   });
 
-  return NextResponse.json({ id: project.id, warning: fetchWarning });
+  const duplicateCount = await findPossibleDuplicates(project.id).catch(() => 0);
+
+  return NextResponse.json({ id: project.id, warning: fetchWarning, duplicateCount });
 }

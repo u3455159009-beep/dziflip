@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { rescoreComparable } from "@/lib/comparableScoring";
 
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   const body = await req.json().catch(() => null);
@@ -27,9 +28,20 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       pricePerM2,
       condition: body.condition || null,
       distanceKm: body.distanceKm != null ? Number(body.distanceKm) : null,
-      priceType: body.priceType || "ASKING"
+      priceType: body.priceType || "ASKING",
+      ownership: body.ownership || null,
+      floor: body.floor || null,
+      totalFloors: body.totalFloors || null,
+      elevator: body.elevator === "" || body.elevator === undefined ? null : Boolean(body.elevator),
+      balcony: body.balcony === "" || body.balcony === undefined ? null : Boolean(body.balcony),
+      terrace: body.terrace === "" || body.terrace === undefined ? null : Boolean(body.terrace),
+      loggia: body.loggia === "" || body.loggia === undefined ? null : Boolean(body.loggia),
+      parking: body.parking === "" || body.parking === undefined ? null : Boolean(body.parking),
+      buildingType: body.buildingType || null,
+      construction: body.construction || null
     }
   });
 
-  return NextResponse.json(comparable);
+  const scored = await rescoreComparable(params.id, comparable.id);
+  return NextResponse.json(scored ? { ...comparable, similarityScore: scored.score, similarityBreakdown: JSON.stringify(scored.breakdown), qualityTier: scored.qualityTier } : comparable);
 }

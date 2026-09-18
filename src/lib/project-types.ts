@@ -1,3 +1,15 @@
+export interface PhotoGenerationDTO {
+  id: string;
+  photoId: string;
+  style: string;
+  prompt: string | null;
+  generatedUrl: string | null;
+  model: string | null;
+  status: string;
+  createdAt: string;
+  generatedAt: string | null;
+}
+
 export interface PhotoDTO {
   id: string;
   projectId: string;
@@ -6,6 +18,17 @@ export interface PhotoDTO {
   notes: string | null;
   sortOrder: number;
   createdAt: string;
+  roomType: string | null;
+  currentCondition: string | null;
+  visibleIssues: string | null;
+  keepNotes: string | null;
+  removeNotes: string | null;
+  replaceNotes: string | null;
+  renovationSuggestions: string | null;
+  analysisConfidence: string | null;
+  analysisSource: string;
+  analyzedAt: string | null;
+  generations: PhotoGenerationDTO[];
 }
 
 export interface ComparableDTO {
@@ -24,6 +47,73 @@ export interface ComparableDTO {
   priceType: string;
   foundAt: string;
   createdAt: string;
+  ownership: string | null;
+  floor: string | null;
+  totalFloors: string | null;
+  elevator: boolean | null;
+  balcony: boolean | null;
+  terrace: boolean | null;
+  loggia: boolean | null;
+  parking: boolean | null;
+  buildingType: string | null;
+  construction: string | null;
+  similarityScore: number | null;
+  similarityBreakdown: string | null;
+  qualityTier: string | null;
+}
+
+export interface ListingEventDTO {
+  id: string;
+  projectId: string;
+  eventType: string;
+  detail: string | null;
+  oldValue: string | null;
+  newValue: string | null;
+  occurredAt: string;
+}
+
+export interface RoomConditionDTO {
+  id: string;
+  projectId: string;
+  room: string;
+  element: string;
+  status: string;
+  notes: string | null;
+  source: string;
+  updatedAt: string;
+}
+
+export interface ProductRequirementDTO {
+  id: string;
+  projectId: string;
+  room: string | null;
+  category: string;
+  description: string;
+  budgetMin: number | null;
+  budgetMax: number | null;
+  dimensions: string | null;
+  style: string | null;
+  quantity: number;
+  status: string;
+  createdAt: string;
+}
+
+export interface PossibleDuplicateDTO {
+  id: string;
+  matchScore: number;
+  classification: string;
+  reasons: string;
+  resolvedStatus: string;
+  createdAt: string;
+  resolvedAt: string | null;
+  otherProject: {
+    id: string;
+    title: string | null;
+    municipality: string | null;
+    district: string | null;
+    askingPrice: number | null;
+    isDemo: boolean;
+  };
 }
 
 export interface BudgetItemDTO {
@@ -159,12 +249,22 @@ export interface ProjectDTO {
   orientation: string | null;
   legalNotes: string | null;
   fullText: string | null;
+  description: string | null;
+  latitude: number | null;
+  longitude: number | null;
   fieldMeta: string | null;
+  fieldSource: string | null;
   targetPrice: number | null;
   externalId: string | null;
   isDemo: boolean;
   sourceWatcherId: string | null;
   sourceWatcher: { id: string; name: string } | null;
+  analysisStage: string;
+  publishedAt: string | null;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  sourceUpdatedAt: string | null;
+  lastVerifiedAt: string | null;
   photos: PhotoDTO[];
   comparables: ComparableDTO[];
   budgetItems: BudgetItemDTO[];
@@ -173,4 +273,9 @@ export interface ProjectDTO {
   contact: ContactDTO | null;
   outreachMessages: OutreachMessageDTO[];
   smsMessages: SmsMessageDTO[];
+  listingEvents: ListingEventDTO[];
+  roomConditions: RoomConditionDTO[];
+  productRequirements: ProductRequirementDTO[];
+  duplicatesAsA: Array<{ id: string; matchScore: number; classification: string; reasons: string; resolvedStatus: string; createdAt: string; resolvedAt: string | null; projectB: PossibleDuplicateDTO["otherProject"] }>;
+  duplicatesAsB: Array<{ id: string; matchScore: number; classification: string; reasons: string; resolvedStatus: string; createdAt: string; resolvedAt: string | null; projectA: PossibleDuplicateDTO["otherProject"] }>;
 }

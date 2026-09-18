@@ -6,6 +6,7 @@
 import { prisma } from "@/lib/prisma";
 import { getSettings } from "@/lib/settings";
 import { computeDataConfidence, type DataConfidenceResult } from "@/lib/confidence";
+import { isDataStale } from "@/lib/staleData";
 import { computeBands, classifyPrice, type AssumptionsInput } from "@/lib/calc";
 import { mockSmsProvider } from "@/lib/sms/mockProvider";
 import { realSmsProvider } from "@/lib/sms/realProvider";
@@ -108,21 +109,25 @@ export function passesDealRadarCriteria(
 // ---------------------------------------------------------------------------
 
 export async function computeConfidenceForProject(projectId: string): Promise<DataConfidenceResult> {
-  const project = await prisma.project.findUnique({
-    where: { id: projectId },
-    include: {
-      comparables: true,
-      budgetItems: true,
-      assumptions: true
-    }
-  });
+  const [project, settings] = await Promise.all([
+    prisma.project.findUnique({
+      where: { id: projectId },
+      include: {
+        comparables: true,
+        budgetItems: true,
+        assumptions: true
+      }
+    }),
+    getSettings()
+  ]);
   const fieldMeta: FieldMeta = project?.fieldMeta ? JSON.parse(project.fieldMeta) : {};
   return computeDataConfidence({
     fieldMeta,
     comparablesCount: project?.comparables.length ?? 0,
     hasRealBudgetItems: (project?.budgetItems.length ?? 0) > 0,
     renovationCostSet: Boolean(project?.assumptions?.renovationCost && project.assumptions.renovationCost > 0),
-    salePriceSet: Boolean(project?.assumptions?.saleBase)
+    salePriceSet: Boolean(project?.assumptions?.saleBase),
+    isStale: isDataStale(project?.lastVerifiedAt, settings.staleDataThresholdDays)
   });
 }
 

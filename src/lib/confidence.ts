@@ -28,6 +28,7 @@ export interface ConfidenceInput {
   hasRealBudgetItems: boolean; // at least one BudgetItem entered manually
   renovationCostSet: boolean; // assumptions.renovationCost is a non-zero number
   salePriceSet: boolean; // assumptions.saleBase is set
+  isStale?: boolean; // critical data hasn't been re-verified within the staleness threshold
 }
 
 export function computeDataConfidence(input: ConfidenceInput): DataConfidenceResult {
@@ -61,6 +62,11 @@ export function computeDataConfidence(input: ConfidenceInput): DataConfidenceRes
       label: "Prodejní cena",
       value: input.salePriceSet ? (comparablesOk ? "ODHAD (z comparables)" : "ODHAD (nepodloženo)") : "NEZNÁMÉ",
       ok: salePriceOk
+    },
+    {
+      label: "Aktuálnost dat",
+      value: input.isStale ? "ZASTARALÉ — potřeba znovu ověřit" : "aktuální",
+      ok: !input.isStale
     }
   ];
 
@@ -72,6 +78,10 @@ export function computeDataConfidence(input: ConfidenceInput): DataConfidenceRes
   } else {
     level = "MEDIUM";
   }
+
+  // Stale critical data can never support a HIGH-confidence verdict —
+  // it may only ever pull the level down, never up.
+  if (input.isStale && level === "HIGH") level = "MEDIUM";
 
   return { level, breakdown };
 }

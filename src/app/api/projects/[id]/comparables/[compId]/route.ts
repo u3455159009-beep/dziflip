@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { rescoreComparable } from "@/lib/comparableScoring";
 
 export async function PATCH(
   req: NextRequest,
@@ -16,21 +17,31 @@ export async function PATCH(
     "locality",
     "disposition",
     "condition",
-    "priceType"
+    "priceType",
+    "ownership",
+    "floor",
+    "totalFloors",
+    "buildingType",
+    "construction"
   ]) {
     if (key in body) data[key] = body[key] || null;
   }
   for (const key of ["areaM2", "price", "pricePerM2", "distanceKm"]) {
     if (key in body) data[key] = body[key] === null || body[key] === "" ? null : Number(body[key]);
   }
+  for (const key of ["elevator", "balcony", "terrace", "loggia", "parking"]) {
+    if (key in body) data[key] = body[key] === null || body[key] === "" ? null : Boolean(body[key]);
+  }
   if (data.price != null && data.areaM2 != null && !("pricePerM2" in body)) {
     data.pricePerM2 = data.price / data.areaM2;
   }
 
-  const comparable = await prisma.comparable.update({
+  await prisma.comparable.update({
     where: { id: params.compId },
     data
   });
+  await rescoreComparable(params.id, params.compId);
+  const comparable = await prisma.comparable.findUnique({ where: { id: params.compId } });
   return NextResponse.json(comparable);
 }
 

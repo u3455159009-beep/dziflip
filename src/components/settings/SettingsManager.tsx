@@ -6,7 +6,10 @@ import {
   CONTACT_AUTOMATION_MODES,
   CONTACT_AUTOMATION_MODE_LABELS,
   SMS_AUTOMATION_MODES,
-  SMS_AUTOMATION_MODE_LABELS
+  SMS_AUTOMATION_MODE_LABELS,
+  COMP_QUALITY_TIERS,
+  COMP_QUALITY_TIER_LABELS,
+  type CompQualityTier
 } from "@/lib/types";
 import { formatDate } from "@/lib/format";
 
@@ -26,6 +29,13 @@ export interface SettingsDTO {
   smsAutomationConfirmedAt: string | null;
   maxAutoSmsPerDay: number;
   smsAutoReplyEnabled: boolean;
+  showDemoData: boolean;
+  minCompCount: number;
+  minCompQuality: string;
+  maxCompDistanceKm: number;
+  maxCompAgeDays: number;
+  aiPhotoAnalysisEnabled: boolean;
+  staleDataThresholdDays: number;
 }
 
 export interface TemplateDTO {
@@ -409,6 +419,73 @@ export function SettingsManager({
               <Textarea defaultValue={t.body} rows={t.channel === "SMS" ? 3 : 5} onBlur={(e) => saveTemplate(t.id, e.target.value)} />
             </div>
           ))}
+        </div>
+      </Card>
+
+      <Card>
+        <SectionTitle subtitle="Parametry Real Data Engine — kolik a jak kvalitních srovnání je potřeba pro spolehlivý odhad, jak staré smí data být, a zda AI analýza fotografií smí běžet.">
+          Real Data Engine
+        </SectionTitle>
+        <div className="flex flex-col gap-3">
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={settings.showDemoData}
+              onChange={(e) => {
+                setSettings((s) => ({ ...s, showDemoData: e.target.checked }));
+                patchSettings({ showDemoData: e.target.checked });
+              }}
+            />
+            Zobrazovat DEMO data v přehledech (Deal Feed, projekty)
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={settings.aiPhotoAnalysisEnabled}
+              onChange={(e) => {
+                setSettings((s) => ({ ...s, aiPhotoAnalysisEnabled: e.target.checked }));
+                patchSettings({ aiPhotoAnalysisEnabled: e.target.checked });
+              }}
+            />
+            AI analýza fotografií zapnuta (vyžaduje připojený Vision provider — zatím PENDING_ACCESS)
+          </label>
+        </div>
+        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <Input
+            label="Min. počet comparables"
+            type="number"
+            defaultValue={settings.minCompCount}
+            onBlur={(e) => patchSettings({ minCompCount: e.target.value || 3 })}
+          />
+          <Select
+            label="Min. kvalita comparables"
+            defaultValue={settings.minCompQuality}
+            onChange={(e) => patchSettings({ minCompQuality: e.target.value })}
+          >
+            {COMP_QUALITY_TIERS.map((t) => (
+              <option key={t} value={t}>
+                {COMP_QUALITY_TIER_LABELS[t as CompQualityTier]}
+              </option>
+            ))}
+          </Select>
+          <Input
+            label="Max. vzdálenost comparables (km)"
+            type="number"
+            defaultValue={settings.maxCompDistanceKm}
+            onBlur={(e) => patchSettings({ maxCompDistanceKm: e.target.value || 2 })}
+          />
+          <Input
+            label="Max. stáří comparables (dny)"
+            type="number"
+            defaultValue={settings.maxCompAgeDays}
+            onBlur={(e) => patchSettings({ maxCompAgeDays: e.target.value || 180 })}
+          />
+          <Input
+            label="Hranice zastaralosti dat (dny)"
+            type="number"
+            defaultValue={settings.staleDataThresholdDays}
+            onBlur={(e) => patchSettings({ staleDataThresholdDays: e.target.value || 14 })}
+          />
         </div>
       </Card>
     </div>

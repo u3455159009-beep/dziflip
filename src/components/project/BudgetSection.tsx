@@ -10,6 +10,7 @@ import {
   PRICE_SOURCE_LABELS,
   type BudgetCategory
 } from "@/lib/types";
+import { computeBudgetRange } from "@/lib/renovationBudget";
 import type { BudgetItemDTO } from "@/lib/project-types";
 
 const emptyForm = {
@@ -43,6 +44,11 @@ export function BudgetSection({ projectId, items: initial }: { projectId: string
   }, [items]);
 
   const grandTotal = useMemo(() => items.reduce((s, i) => s + (i.total ?? 0), 0), [items]);
+
+  const budgetRange = useMemo(
+    () => computeBudgetRange(items.map((i) => ({ name: i.name, total: i.total, priceSource: i.priceSource }))),
+    [items]
+  );
 
   const byRoom = useMemo(() => {
     const map = new Map<string, BudgetItemDTO[]>();
@@ -216,6 +222,29 @@ export function BudgetSection({ projectId, items: initial }: { projectId: string
             </tbody>
           </table>
         </div>
+
+        {budgetRange.expected != null && (
+          <div className="mt-5 rounded-lg border border-line bg-beige-50 p-4">
+            <div className="mb-2 text-xs uppercase tracking-wide text-muted">
+              Rozpětí rozpočtu (s ohledem na nejistotu, ne stylová varianta)
+            </div>
+            <div className="grid grid-cols-3 gap-3 text-center">
+              <div>
+                <div className="text-[10px] uppercase tracking-wide text-muted">Low</div>
+                <div className="font-serif text-xl text-ink number-tabular">{formatCZK(budgetRange.low)}</div>
+              </div>
+              <div>
+                <div className="text-[10px] uppercase tracking-wide text-muted">Expected</div>
+                <div className="font-serif text-xl text-ink number-tabular">{formatCZK(budgetRange.expected)}</div>
+              </div>
+              <div>
+                <div className="text-[10px] uppercase tracking-wide text-muted">High</div>
+                <div className="font-serif text-xl text-ink number-tabular">{formatCZK(budgetRange.high)}</div>
+              </div>
+            </div>
+            <p className="mt-2 text-[11px] text-muted">{budgetRange.explanation}</p>
+          </div>
+        )}
 
         <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
           <div className="rounded-lg border border-line p-4">

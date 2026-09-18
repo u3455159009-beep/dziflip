@@ -5,7 +5,14 @@ import Link from "next/link";
 import { formatCZK, formatDate, formatPct } from "@/lib/format";
 import { FLIP_BAND_ICONS, FLIP_BAND_LABELS } from "@/lib/calc";
 import { DATA_CONFIDENCE_LABELS, SMS_FEED_STATUS_LABELS } from "@/lib/types";
+import { DATA_ORIGIN_LABELS } from "@/lib/dataOrigin";
 import type { DealFeedItem } from "@/lib/dealFeed";
+
+const ORIGIN_BADGE_STYLES: Record<string, string> = {
+  DEMO: "bg-ink/80 text-paper",
+  REAL: "bg-band-good text-white",
+  MANUAL: "bg-beige-400 text-white"
+};
 
 const BAND_STYLES: Record<string, string> = {
   BUY_NOW: "bg-band-hotBg border-band-hot/40 text-band-hot",
@@ -30,6 +37,8 @@ const SMS_STATUS_STYLES: Record<string, string> = {
 
 export function DealCard({ item }: { item: DealFeedItem }) {
   const [showWhy, setShowWhy] = useState(false);
+  const overstatesConfidence =
+    item.dealScoreConfidence === "LOW_DATA" && (item.band === "GOOD" || item.band === "BUY_NOW");
 
   return (
     <div className="overflow-hidden rounded-xl2 border border-line bg-card shadow-card">
@@ -44,16 +53,21 @@ export function DealCard({ item }: { item: DealFeedItem }) {
             </div>
           )}
         </Link>
-        {item.isDemo && (
-          <span className="absolute left-3 top-3 rounded-full bg-ink/80 px-2 py-0.5 text-[10px] font-medium uppercase text-paper">
-            DEMO
-          </span>
-        )}
-        {item.band && (
+        <span
+          className={`absolute left-3 top-3 rounded-full px-2 py-0.5 text-[10px] font-medium uppercase ${ORIGIN_BADGE_STYLES[item.dataOrigin]}`}
+        >
+          {DATA_ORIGIN_LABELS[item.dataOrigin]}
+        </span>
+        {item.band && !overstatesConfidence && (
           <span
             className={`absolute right-3 top-3 inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold ${BAND_STYLES[item.band]}`}
           >
             {FLIP_BAND_ICONS[item.band]} {FLIP_BAND_LABELS[item.band]}
+          </span>
+        )}
+        {overstatesConfidence && (
+          <span className="absolute right-3 top-3 max-w-[70%] rounded-full border border-band-normal/40 bg-band-normalBg px-2.5 py-1 text-right text-[11px] font-semibold leading-tight text-band-normal">
+            ⚠️ POTENCIÁLNĚ ZAJÍMAVÉ — POTŘEBA OVĚŘIT DATA
           </span>
         )}
       </div>
@@ -139,6 +153,21 @@ export function DealCard({ item }: { item: DealFeedItem }) {
             {item.why.confidenceBreakdown.map((b) => (
               <Row key={b.label} label={b.label} value={b.value} tone={b.ok ? "good" : undefined} />
             ))}
+            <Row
+              label="ARV (hodnota po rekonstrukci)"
+              value={
+                item.why.arv.insufficientData
+                  ? "NEDOSTATEK DAT"
+                  : `${formatCZK(item.why.arv.base)} (${item.why.arv.confidence === "HIGH" ? "vysoká jistota" : item.why.arv.confidence === "MEDIUM" ? "střední jistota" : "nízká jistota"})`
+              }
+              tone={!item.why.arv.insufficientData && item.why.arv.confidence !== "LOW" ? "good" : undefined}
+            />
+            {overstatesConfidence && (
+              <div className="rounded-md bg-band-normalBg p-2 text-band-normal">
+                Cenové pásmo napovídá dobrou cenu, ale data (comps / ARV / kritická pole) nejsou dostatečně ověřená —
+                než se rozhodneš, ověř zdroje ručně.
+              </div>
+            )}
           </div>
         )}
       </div>
