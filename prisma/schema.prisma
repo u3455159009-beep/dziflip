@@ -146,6 +146,12 @@ model Project {
   lastComparableDiscoveryAt   DateTime?
   comparableDiscoveryNote     String? // e.g. "žádný aktivní zdroj srovnání" — always shown to the user, never silent
 
+  // Listing Discovery Engine — which provider/external id produced the best
+  // match above, when it wasn't NOT_FOUND. Provider-agnostic by design (not
+  // FlatScan-specific) so any future provider plugs in the same way.
+  discoveredListingProvider   String?
+  discoveredListingExternalId String?
+
   // JSON map of fieldName -> DataConfidence, stored as string
   fieldMeta   String?
   // JSON map of fieldName -> human-readable source label (e.g. "Sreality.cz", "ruční zadání", "AI Vision")
@@ -337,6 +343,12 @@ model Settings {
   // Real Product Shopping & Renovation Engine (Phase 5)
   shoppingReferenceLocality String? // used only to bias product-branch search toward this area; never auto-detected
 
+  // FlatScan Data API integration — cache freshness window. FlatScan's
+  // Starter tier allows only 1 000 API calls/month, so search results and
+  // individual listings are read-through cached; this controls how long a
+  // cached result is served before a fresh API call is made again.
+  flatScanCacheTtlHours Int @default(24)
+
   updatedAt DateTime @updatedAt
 }
 
@@ -492,6 +504,15 @@ model Comparable {
   lastSeenAt     DateTime @default(now()) // last discovery run that re-confirmed this listing still exists at this price
   isOutlier      Boolean  @default(false) // excluded from Market Value stats by IQR outlier detection (item 7)
   outlierReason  String?
+
+  // Provider's own id for this listing (e.g. FlatScan's numeric id) — links
+  // back to a provider-specific cache/price-history for richer detail
+  // (days on market, discount %, coordinates) without re-fetching.
+  externalId      String?
+  daysOnMarket    Int?
+  discountPercent Float?
+  latitude        Float?
+  longitude       Float?
 
   priceHistory ComparablePriceHistory[]
 
@@ -708,4 +729,108 @@ model Assumptions {
   bandWidthPct Float? // width of NORMAL/BUY-NOW bands around the good threshold, default 0.08
 
   updatedAt DateTime @updatedAt
+}
+
+// --- FlatScan Data API integration ---
+//
+// A global (cross-project) read-through cache so the same FlatScan listing
+// is never re-fetched twice within its TTL just because it's relevant to
+// two different projects' comparable sets — the Starter tier allows only
+// 1 000 calls/month. See src/lib/sources/flatScan/ for the client/provider.
+//
+// FlatScanRequestLog is the source of truth for "how many real API calls
+// have we made" (Provider Health, item 2) — a cache hit never adds a row
+// here, only an actual outbound HTTP request does.
+
+model FlatScanListingCache {
+  id         String @id @default(cuid())
+  flatScanId String @unique // FlatScan's own numeric/string listing id
+
+  portal            String? // "server" in the FlatScan API — the original portal, e.g. "Sreality.cz"
+  url               String?
+  name              String?
+  disposition       String?
+  areaM2            Float?
+  municipality      String? // "city"
+  locality          String?
+  latitude          Float?
+  longitude         Float?
+  priceOriginal     Float?
+  priceCurrent      Float?
+  pricePerM2        Float? // price.per_meter (original)
+  currentPricePerM2 Float? // price.current_per_meter
+  onRequest         Boolean @default(false) // price.on_request
+  seller            String?
+  daysOnMarket      Int?
+  discountPercent   Float?
+  active            Boolean @default(true)
+  sourceCreatedAt   DateTime? // dates.created
+  sourceDeletedAt   DateTime? // dates.deleted
+
+  // Comparison-relevant fields the documented example doesn't list but a
+  // real listing object may carry (condition, construction, floor,
+  // elevator, balcony/terrace, parking, ownership) — read defensively by
+  // the mapper if present, left null otherwise. Never guessed.
+  condition    String?
+  construction String?
+  floor        String?
+  totalFloors  String?
+  elevator     Boolean?
+  balcony      Boolean?
+  terrace      Boolean?
+  loggia       Boolean?
+  parking      Boolean?
+  ownership    String?
+
+  rawJson String? // full raw API response object, for fields not yet modeled above
+
+  firstSeenAt   DateTime @default(now()) // first time DziFlip ever saw this FlatScan listing
+  lastSeenAt    DateTime @default(now()) // last time a live API call re-confirmed it (price/status)
+  lastFetchedAt DateTime @default(now()) // cache freshness clock for this row
+
+  priceHistory FlatScanPriceHistoryCache[]
+}
+
+model FlatScanPriceHistoryCache {
+  id             String               @id @default(cuid())
+  listingCacheId String
+  listingCache   FlatScanListingCache @relation(fields: [listingCacheId], references: [id], onDelete: Cascade)
+  price          Float?
+  recordedAt     DateTime
+  fetchedAt      DateTime             @default(now())
+}
+
+// Caches a whole GET /listings search result (by normalized query
+// signature) so an identical/overlapping search from a different project,
+// within TTL, reuses the FlatScan id list instead of calling the API again.
+model FlatScanSearchCache {
+  id             String   @id @default(cuid())
+  querySignature String   @unique
+  flatScanIds    String // JSON array of FlatScan listing ids
+  fetchedAt      DateTime @default(now())
+}
+
+// Cached GET /districts, /localities, /stats context — refreshed far less
+// often than individual listings since locality-level aggregates move slowly.
+model FlatScanLocalityStats {
+  id                 String   @id @default(cuid())
+  key                String   @unique // normalized "municipality|district"
+  municipality       String?
+  district           String?
+  medianPricePerM2   Float?
+  avgPricePerM2      Float?
+  activeListingCount Int?
+  trendPct           Float? // only set when the API itself reports a trend — never computed/guessed locally
+  fetchedAt          DateTime @default(now())
+}
+
+// One row per actual outbound FlatScan API request — never per cache hit.
+// This is what "počet API volání tento měsíc" in Provider Health counts.
+model FlatScanRequestLog {
+  id           String   @id @default(cuid())
+  endpoint     String // e.g. "GET /listings"
+  ok           Boolean
+  statusCode   Int?
+  errorMessage String?
+  requestedAt  DateTime @default(now())
 }

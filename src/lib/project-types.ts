@@ -71,6 +71,11 @@ export interface ComparableDTO {
   lastSeenAt: string;
   isOutlier: boolean;
   outlierReason: string | null;
+  externalId: string | null;
+  daysOnMarket: number | null;
+  discountPercent: number | null;
+  latitude: number | null;
+  longitude: number | null;
   priceHistory: ComparablePriceHistoryDTO[];
 }
 
@@ -344,6 +349,8 @@ export interface ProjectDTO {
   discoveredListingUrl: string | null;
   discoveredListingConfidence: string | null;
   discoveredListingReasons: string | null;
+  discoveredListingProvider: string | null;
+  discoveredListingExternalId: string | null;
   lastComparableDiscoveryAt: string | null;
   comparableDiscoveryNote: string | null;
   externalId: string | null;

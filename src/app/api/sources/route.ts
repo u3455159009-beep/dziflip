@@ -6,8 +6,11 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { SOURCE_PROVIDERS } from "@/lib/sources/registry";
+import { getFlatScanMonthlyRequestCount } from "@/lib/sources/flatScan/client";
 
 export type ProviderHealthStatus = "CONNECTED" | "PENDING_ACCESS" | "ERROR" | "DISABLED";
+
+const FLATSCAN_MONTHLY_BUDGET = 1000;
 
 export async function GET() {
   const providers = await Promise.all(
@@ -25,7 +28,37 @@ export async function GET() {
           healthStatus: "PENDING_ACCESS" as ProviderHealthStatus,
           lastSuccessAt: null as string | null,
           totalFound: 0,
-          lastError: null as { message: string; occurredAt: string } | null
+          lastError: null as { message: string; occurredAt: string } | null,
+          monthlyRequestCount: null as number | null,
+          monthlyRequestBudget: null as number | null
+        };
+      }
+
+      // FlatScan keeps its own precise request log (FlatScanRequestLog) —
+      // a cache hit never adds a row there, so it's the honest source of
+      // truth for "last successful request/error" and the monthly call
+      // budget, distinct from the generic Comparable/Project-based
+      // inference every other provider is judged by below.
+      if (p.key === "FLATSCAN") {
+        const [lastOk, lastErr, comparableCount, monthlyRequestCount] = await Promise.all([
+          prisma.flatScanRequestLog.findFirst({ where: { ok: true }, orderBy: { requestedAt: "desc" } }),
+          prisma.flatScanRequestLog.findFirst({ where: { ok: false }, orderBy: { requestedAt: "desc" } }),
+          prisma.comparable.count({ where: { sourceProvider: "FLATSCAN" } }),
+          getFlatScanMonthlyRequestCount()
+        ]);
+        const healthStatus: ProviderHealthStatus =
+          lastErr && (!lastOk || lastErr.requestedAt > lastOk.requestedAt) ? "ERROR" : "CONNECTED";
+        return {
+          key: p.key,
+          label: p.label,
+          status: p.status,
+          statusNote: p.statusNote ?? null,
+          healthStatus,
+          lastSuccessAt: lastOk ? lastOk.requestedAt.toISOString() : null,
+          totalFound: comparableCount,
+          lastError: lastErr ? { message: lastErr.errorMessage ?? `HTTP ${lastErr.statusCode ?? "?"}`, occurredAt: lastErr.requestedAt.toISOString() } : null,
+          monthlyRequestCount,
+          monthlyRequestBudget: FLATSCAN_MONTHLY_BUDGET
         };
       }
 
@@ -56,7 +89,9 @@ export async function GET() {
         healthStatus,
         lastSuccessAt: lastSuccessAt ? lastSuccessAt.toISOString() : null,
         totalFound,
-        lastError: lastErrorLog ? { message: lastErrorLog.errorMessage, occurredAt: lastErrorLog.occurredAt.toISOString() } : null
+        lastError: lastErrorLog ? { message: lastErrorLog.errorMessage, occurredAt: lastErrorLog.occurredAt.toISOString() } : null,
+        monthlyRequestCount: null as number | null,
+        monthlyRequestBudget: null as number | null
       };
     })
   );

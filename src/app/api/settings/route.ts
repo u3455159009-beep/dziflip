@@ -8,7 +8,7 @@ export async function GET() {
 }
 
 const NUMERIC_FIELDS = ["defaultMinProfit", "defaultMinRoiPct", "defaultReserve", "defaultRenovationCostPerM2", "maxCompDistanceKm"];
-const INT_FIELDS = ["dailyContactLimit", "maxAutoSmsPerDay", "minCompCount", "maxCompAgeDays", "staleDataThresholdDays"];
+const INT_FIELDS = ["dailyContactLimit", "maxAutoSmsPerDay", "minCompCount", "maxCompAgeDays", "staleDataThresholdDays", "flatScanCacheTtlHours"];
 const BOOL_FIELDS = ["notifyInApp", "notifyEmail", "smsAutoReplyEnabled", "showDemoData", "aiPhotoAnalysisEnabled"];
 const STRING_FIELDS = ["notifyEmailAddress", "defaultTemplateId", "defaultSmsTemplateId", "shoppingReferenceLocality"];
 

@@ -24,6 +24,8 @@ import { DuplicatesPanel } from "./DuplicatesPanel";
 import { MarketValuePanel } from "./MarketValuePanel";
 import { InvestmentDashboard } from "./InvestmentDashboard";
 import { AnalysisGapsBanner } from "./AnalysisGapsBanner";
+import { LocalityContextPanel } from "./LocalityContextPanel";
+import { DiscoveredListingHistoryPanel } from "./DiscoveredListingHistoryPanel";
 import { computeDataOrigin, DATA_ORIGIN_LABELS } from "@/lib/dataOrigin";
 import { isDataStale } from "@/lib/staleData";
 import { computeDataConfidence } from "@/lib/confidence";
@@ -161,6 +163,8 @@ export function ProjectView({
         <InvestmentDashboard project={project} marketValue={marketValue} arv={arv} dataConfidenceLevel={dataConfidence.level} />
       )}
 
+      <LocalityContextPanel projectId={project.id} />
+
       <Card className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <div className="text-xs uppercase tracking-wide text-muted">Nabídková cena</div>
@@ -198,6 +202,8 @@ export function ProjectView({
       />
 
       <SourceEvidencePanel project={project} />
+
+      <DiscoveredListingHistoryPanel projectId={project.id} />
 
       <ComparablesTable
         projectId={project.id}

@@ -60,6 +60,8 @@ export interface ListingSourceItem {
   parking?: boolean | null;
   energyRating?: string | null; // maps to Project.penb
   orientation?: string | null;
+  daysOnMarket?: number | null;
+  discountPercent?: number | null;
   contactName?: string | null;
   contactPhone?: string | null;
   contactEmail?: string | null;

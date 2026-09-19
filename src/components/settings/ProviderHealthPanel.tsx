@@ -13,6 +13,8 @@ interface ProviderHealthInfo {
   lastSuccessAt: string | null;
   totalFound: number;
   lastError: { message: string; occurredAt: string } | null;
+  monthlyRequestCount: number | null;
+  monthlyRequestBudget: number | null;
 }
 
 const HEALTH_STYLES: Record<ProviderHealthInfo["healthStatus"], string> = {
@@ -75,9 +77,14 @@ export function ProviderHealthPanel() {
                   {p.statusNote && <p className="mt-1 text-xs text-muted">{p.statusNote}</p>}
                   {p.status === "ACTIVE" && (
                     <div className="mt-2 grid grid-cols-1 gap-1 text-xs text-muted sm:grid-cols-3">
-                      <div>Poslední úspěšný request: {p.lastSuccessAt ? formatDateTime(p.lastSuccessAt) : "zatím žádný"}</div>
+                      <div>Poslední synchronizace: {p.lastSuccessAt ? formatDateTime(p.lastSuccessAt) : "zatím žádná"}</div>
                       <div>Získáno nabídek celkem: {p.totalFound}</div>
                       <div>{p.lastError ? `Poslední chyba: ${p.lastError.message} (${formatDateTime(p.lastError.occurredAt)})` : "Žádná chyba v logu"}</div>
+                      {p.monthlyRequestBudget != null && (
+                        <div>
+                          API volání tento měsíc: {p.monthlyRequestCount} / {p.monthlyRequestBudget}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

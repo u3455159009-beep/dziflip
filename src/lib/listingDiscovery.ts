@@ -108,6 +108,11 @@ export interface DiscoveryResult {
   reasons: string[];
   providersTried: string[];
   note: string;
+  /** Which provider produced the best match — null when NOT_FOUND. Lets a
+   * caller store a provider-specific follow-up reference (e.g. a FlatScan
+   * listing id) without this module knowing about any specific provider. */
+  matchProviderKey: string | null;
+  matchExternalId: string | null;
 }
 
 const CONFIDENCE_RANK: Record<ListingMatchConfidence, number> = {
@@ -135,7 +140,9 @@ export async function discoverOriginalListing(subject: ListingMatchSubject): Pro
       portal: null,
       reasons: [],
       providersTried,
-      note: "Žádný aktivní zdroj pro vyhledání původního inzerátu není připojen (viz Nastavení → Provider Health)."
+      note: "Žádný aktivní zdroj pro vyhledání původního inzerátu není připojen (viz Nastavení → Provider Health).",
+      matchProviderKey: null,
+      matchExternalId: null
     };
   }
 
@@ -148,7 +155,7 @@ export async function discoverOriginalListing(subject: ListingMatchSubject): Pro
     maxPrice: subject.askingPrice ? subject.askingPrice * 1.3 : undefined
   };
 
-  let best: { result: ListingMatchResult; candidate: ListingSourceItem } | null = null;
+  let best: { result: ListingMatchResult; candidate: ListingSourceItem; providerKey: string } | null = null;
 
   for (const provider of active) {
     providersTried.push(provider.key);
@@ -158,7 +165,7 @@ export async function discoverOriginalListing(subject: ListingMatchSubject): Pro
         const result = scoreListingMatch(subject, candidate);
         if (result.confidence === "NOT_FOUND") continue;
         if (!best || CONFIDENCE_RANK[result.confidence] > CONFIDENCE_RANK[best.result.confidence]) {
-          best = { result, candidate };
+          best = { result, candidate, providerKey: provider.key };
         }
       }
     } catch (err) {
@@ -174,7 +181,9 @@ export async function discoverOriginalListing(subject: ListingMatchSubject): Pro
       portal: null,
       reasons: [],
       providersTried,
-      note: `Prohledáno ${providersTried.length} aktivních zdrojů, žádná dostatečně jistá shoda nenalezena.`
+      note: `Prohledáno ${providersTried.length} aktivních zdrojů, žádná dostatečně jistá shoda nenalezena.`,
+      matchProviderKey: null,
+      matchExternalId: null
     };
   }
 
@@ -184,6 +193,8 @@ export async function discoverOriginalListing(subject: ListingMatchSubject): Pro
     portal: best.candidate.portal,
     reasons: best.result.reasons,
     providersTried,
-    note: `Nalezeno přes ${best.candidate.portal}.`
+    note: `Nalezeno přes ${best.candidate.portal}.`,
+    matchProviderKey: best.providerKey,
+    matchExternalId: best.candidate.externalId
   };
 }

@@ -130,10 +130,70 @@ Portály Sreality.cz, Bezrealitky.cz a Reality.iDNES.cz nemají veřejné,
 ToS-souhlasné API pro hromadné stahování nabídek — proto zůstávají
 `PENDING_ACCESS` natrvalo, dokud nezískáš oficiální partnerský přístup.
 
-Jediný zdroj, který lze aktivovat bez portálového partnerství, je
-**`WEB_SEARCH`** (`src/lib/sources/searchProvider.ts`) — obecný provider nad
-libovolným licencovaným vyhledávacím/realitním datovým API (např. SERP API
-nebo agregátor realitních dat), který ale musíš mít vlastní. Aktivace:
+### 7.1 FlatScan Data API (doporučené — čeká jen na klíč)
+
+Kompletní přímá integrace na FlatScan Data API (`src/lib/sources/flatScan/`)
+je hotová a čeká pouze na API klíč — po jeho nastavení není potřeba nic
+dalšího programovat.
+
+1. Získej `FLATSCAN_API_KEY` od FlatScanu (https://flatscan.cz).
+2. Nastav v proměnných prostředí **jen**:
+   ```
+   FLATSCAN_API_KEY=<tvůj klíč>
+   ```
+   (`FLATSCAN_API_BASE_URL` nech nenastavenou — výchozí
+   `https://flatscan.cz/api/v1` je správná; přepiš ji jen pokud ti FlatScan
+   dá jinou adresu.)
+3. Po redeploy/restartu appky:
+   - `/settings` → **Provider Health** → `FlatScan Data API` se přepne z
+     ČEKÁ NA PŘÍSTUP na PŘIPOJENO (nebo CHYBA, pokud klíč nefunguje — appka
+     to poctivě ukáže, klíč sama nikdy nikam nevypíše).
+   - **Comparable Discovery Engine** začne u nových i existujících
+     nemovitostí automaticky hledat srovnatelné nabídky přes FlatScan.
+   - **Listing Discovery Engine** začne zkoušet dohledat původní inzerát,
+     když uživatel vloží jen text/název bez URL.
+   - Na detailu nemovitosti se navíc objeví panel **Lokalita** (medián/
+     průměr Kč/m², počet aktivních nabídek, trend, odchylka nabídky od
+     lokálního mediánu) a panel **Historie ceny — nalezený originál**
+     (původní/aktuální cena, pokles, dny na trhu) — oba jen když FlatSkan
+     pro danou lokalitu/nabídku skutečně data vrátí.
+
+**Rozpočet API volání.** FlatScan Starter má limit 1 000 volání/měsíc.
+Appka to respektuje dvouúrovňovou cache (výsledky hledání i jednotlivé
+nabídky se cachují v databázi, výchozí platnost 24 h — nastavitelná v
+`/settings` jako "TTL cache FlatScan dat"), takže stejný dotaz ze dvou
+různých projektů ve stejné oblasti během 24 h nespotřebuje druhé volání.
+Aktuální počet volání za tento měsíc vs. limit 1 000 je vidět přímo v
+Provider Health u FlatScanu.
+
+**Pozor — parametry `/listings` nejsou z brief dokumentace jisté.**
+Integrace odesílá filtry jako `city`, `district`, `disposition`,
+`area_min`/`area_max`, `price_max`, `ownership_type` — to je nejlepší odhad
+z příkladu objektu nabídky, který jsi poskytl, ne z oficiální
+dokumentace parametrů. Až budeš mít klíč a skutečnou dokumentaci, zkontroluj
+`src/lib/sources/flatScan/provider.ts` (funkce `toFlatScanQuery`) a
+`types.ts` (`FlatScanListingsQuery`) — pokud se přesné názvy parametrů liší,
+uprav je tam. Odpovědi appka parsuje defenzivně (chybějící pole se nikdy
+nedoplňují odhadem), takže i při drobném nesouladu parametrů appka nespadne,
+jen prostě nic nenajde a poctivě to napíše do `comparableDiscoveryNote`.
+
+Pole, která dokumentovaný příklad nabídky neobsahuje (`condition`,
+`construction`, `floor`, `elevator`, `balcony`/`terrace`, `parking`,
+`ownership`) appka čte defenzivně, pokud je FlatScan skutečně vrací — pokud
+ne, zůstanou u daného comparable prázdná a similarity score se počítá jen
+z polí, která reálně známe (stejně jako u všech ostatních zdrojů).
+
+FlatScanův vlastní AI deal score (`/ai-scores`) appka **nikdy nepoužívá** —
+DziFlip má vlastní, čistě matematický výpočet (Flip Score / MAX BUY PRICE),
+FlatScanovo skóre by ho nemělo nijak nahrazovat ani ovlivňovat, takže tento
+endpoint není v integraci vůbec volaný.
+
+### 7.2 WEB_SEARCH (obecný, alternativní zdroj)
+
+Kromě FlatScanu je k dispozici i obecný, providerem-neutrální zdroj —
+**`WEB_SEARCH`** (`src/lib/sources/searchProvider.ts`) — nad libovolným
+jiným licencovaným vyhledávacím/realitním datovým API, které bys chtěl
+použít navíc nebo místo FlatScanu. Aktivace:
 
 1. Nastav v proměnných prostředí `SEARCH_API_KEY` (a volitelně
    `SEARCH_API_URL`, pokud tvé API neběží na výchozí adrese v kódu).
@@ -162,6 +222,7 @@ dosud.
 | Proměnná | Hodnota |
 |---|---|
 | `DATABASE_URL` | Connection string k tvé Prisma Postgres databázi — Vercel ho vloží sám při připojení databáze k projektu |
+| `FLATSCAN_API_KEY` | *(volitelné, ale doporučené)* Jakmile ho dostaneš od FlatScanu, přidej ho do Vercelu a redeployni — aktivuje automatické comparables, listing discovery, historii cen a lokalitní kontext (viz bod 7.1). Bez něj appka běží dál stejně jako dosud, jen bez těchto automatizací. |
 
 Vše ostatní z `.env.example` (SMTP, SMS API, Vision API…) je **volitelné** —
 appka bez nich normálně běží, jen příslušné funkce zůstanou v bezpečném

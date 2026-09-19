@@ -183,7 +183,9 @@ export async function POST(req: NextRequest) {
           data: {
             discoveredListingUrl: match.url,
             discoveredListingConfidence: match.confidence,
-            discoveredListingReasons: JSON.stringify(match.reasons)
+            discoveredListingReasons: JSON.stringify(match.reasons),
+            discoveredListingProvider: match.matchProviderKey,
+            discoveredListingExternalId: match.matchExternalId
           }
         })
       )

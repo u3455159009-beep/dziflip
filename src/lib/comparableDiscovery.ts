@@ -125,6 +125,8 @@ export async function discoverComparablesForProject(
           price: item.askingPrice,
           pricePerM2,
           condition: item.condition ?? existing.condition,
+          daysOnMarket: item.daysOnMarket ?? existing.daysOnMarket,
+          discountPercent: item.discountPercent ?? existing.discountPercent,
           lastSeenAt: new Date()
         }
       });
@@ -158,6 +160,11 @@ export async function discoverComparablesForProject(
           construction: item.construction,
           priceType: "ASKING",
           sourceProvider: providerKey,
+          externalId: item.externalId || null,
+          daysOnMarket: item.daysOnMarket ?? null,
+          discountPercent: item.discountPercent ?? null,
+          latitude: item.latitude ?? null,
+          longitude: item.longitude ?? null,
           lastSeenAt: new Date()
         }
       });

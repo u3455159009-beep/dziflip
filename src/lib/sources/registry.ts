@@ -4,9 +4,11 @@ import { srealityProvider } from "./srealityProvider";
 import { bezrealitkyProvider } from "./bezrealitkyProvider";
 import { realityIdnesProvider } from "./realityIdnesProvider";
 import { webSearchProvider } from "./searchProvider";
+import { flatScanProvider } from "./flatScan/provider";
 
 export const SOURCE_PROVIDERS: ListingSourceProvider[] = [
   mockDemoProvider,
+  flatScanProvider,
   webSearchProvider,
   srealityProvider,
   bezrealitkyProvider,

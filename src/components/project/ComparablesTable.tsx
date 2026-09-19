@@ -246,7 +246,17 @@ export function ComparablesTable({
               return (
                 <Fragment key={c.id}>
                   <tr className="border-b border-line/60 number-tabular">
-                    <td className="py-2.5 pr-3 max-w-[220px] truncate">{c.title || "—"}</td>
+                    <td className="py-2.5 pr-3 max-w-[220px]">
+                      <div className="truncate">{c.title || "—"}</div>
+                      {(c.daysOnMarket != null || c.discountPercent != null) && (
+                        <div className="mt-0.5 flex gap-1.5 text-[10px] font-normal normal-case text-muted">
+                          {c.daysOnMarket != null && <span>{c.daysOnMarket} dní na trhu</span>}
+                          {c.discountPercent != null && c.discountPercent > 0 && (
+                            <span className="text-band-good">− {formatNumber(c.discountPercent, 1)} %</span>
+                          )}
+                        </div>
+                      )}
+                    </td>
                     <td className="py-2.5 pr-3">{c.locality || "—"}</td>
                     <td className="py-2.5 pr-3">{c.disposition || "—"}</td>
                     <td className="py-2.5 pr-3 text-right">{formatNumber(c.areaM2)}</td>

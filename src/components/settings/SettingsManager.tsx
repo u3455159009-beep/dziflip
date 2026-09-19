@@ -38,6 +38,7 @@ export interface SettingsDTO {
   aiPhotoAnalysisEnabled: boolean;
   staleDataThresholdDays: number;
   shoppingReferenceLocality: string | null;
+  flatScanCacheTtlHours: number;
 }
 
 export interface TemplateDTO {
@@ -487,6 +488,12 @@ export function SettingsManager({
             type="number"
             defaultValue={settings.staleDataThresholdDays}
             onBlur={(e) => patchSettings({ staleDataThresholdDays: e.target.value || 14 })}
+          />
+          <Input
+            label="TTL cache FlatScan dat (hodiny)"
+            type="number"
+            defaultValue={settings.flatScanCacheTtlHours}
+            onBlur={(e) => patchSettings({ flatScanCacheTtlHours: e.target.value || 24 })}
           />
         </div>
       </Card>
