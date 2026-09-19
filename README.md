@@ -7,7 +7,9 @@ cenovou analýzu, maximální nákupní cenu, ekonomiku flipu a rozpočet rekons
 ## Architektura
 
 - **Next.js 14 (App Router) + TypeScript** — frontend i backend (API routes) v jednom projektu
-- **Prisma + SQLite** (`prisma/dev.db`) — databáze projektů, srovnání, rozpočtu a fotografií
+- **Prisma + PostgreSQL** — lokálně přes Docker Compose (`docker-compose.yml`), v produkci přes
+  libovolného Postgres providera (Vercel Postgres, Prisma Postgres, Neon, Supabase…) — viz
+  [DEPLOY.md](./DEPLOY.md) pro nasazení na Vercel
 - **Tailwind CSS** — prémiové minimalistické UI (bílá/béžová, zaoblené karty)
 - Oddělené vrstvy v `src/lib/`:
   - `extract.ts` — extrakce údajů z textu/HTML inzerátu (regex heuristiky, nikdy nevymýšlí data)
@@ -25,14 +27,20 @@ cenovou analýzu, maximální nákupní cenu, ekonomiku flipu a rozpočet rekons
   - `smsHub.ts` — jádro SMS Hubu: DEMO/REAL firewall, AUTO gate (9 pravidel), dedup, denní limit,
     blacklist, audit log, deterministická klasifikace příchozích SMS a parsování termínu
 
-## Spuštění
+## Spuštění (lokální vývoj)
+
+Vyžaduje Docker (pro lokální PostgreSQL) — viz [DEPLOY.md](./DEPLOY.md) pro nasazení na Vercel.
 
 ```bash
 npm install
-cp .env.example .env   # výchozí SQLite databáze, funguje bez úprav
-npx prisma db push     # vytvoří dev.db
-npm run dev            # http://localhost:3000
+cp .env.example .env       # výchozí hodnoty odpovídají docker-compose.yml, funguje bez úprav
+docker compose up -d       # spustí lokální PostgreSQL na localhost:5432
+npx prisma migrate deploy  # aplikuje migrace z prisma/migrations/
+npm run dev                # http://localhost:3000
 ```
+
+Změna schématu: upravte `prisma/schema.prisma` a spusťte `npm run db:migrate -- --name popis_zmeny`
+(vytvoří novou migraci v `prisma/migrations/` a rovnou ji aplikuje lokálně).
 
 ## Fáze 2 — Deal Radar, alerty a komunikace
 

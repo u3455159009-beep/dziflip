@@ -3,8 +3,14 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  // Pooled/runtime connection (e.g. Prisma Accelerate's prisma+postgres://,
+  // or a pgbouncer-pooled postgres:// URL). Required.
+  url       = env("DATABASE_URL")
+  // Direct (unpooled) connection, used only for schema migrations
+  // (`prisma migrate deploy` / `migrate dev`). If your provider only gives
+  // you one connection string, set DIRECT_URL to the same value.
+  directUrl = env("DIRECT_URL")
 }
 
 // SQLite has no native enum support in Prisma; statuses are validated in TS (see src/lib/types.ts)
