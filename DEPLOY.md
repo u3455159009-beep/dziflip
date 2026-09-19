@@ -6,15 +6,13 @@ Vercel nabízí **Prisma Postgres** jako databázi k projektu.
 
 ## 1. Co appka teď očekává
 
-`prisma/schema.prisma` používá dvě proměnné prostředí:
+`prisma/schema.prisma` používá jednu proměnnou prostředí:
 
-- **`DATABASE_URL`** — připojení, které Prisma Client používá za běhu appky.
-  Může to být pooled/proxy připojení (např. `prisma+postgres://…` u Prisma
-  Postgres/Accelerate, nebo pgbouncer URL).
-- **`DIRECT_URL`** — přímé (nepoolované) připojení, používané výhradně pro
-  spuštění migrací (`prisma migrate deploy`). Pokud váš provider dává jen
-  jeden connection string, nastavte `DIRECT_URL` na stejnou hodnotu jako
-  `DATABASE_URL`.
+- **`DATABASE_URL`** — jediné connection string, které appka potřebuje.
+  Prisma Client ho používá za běhu (čtení/zápis dat) a `prisma migrate
+  deploy` ho používá i pro aplikaci migrací. Vercelova integrace **Prisma
+  Postgres** dává přesně tuto jednu proměnnou a nic víc — a to je v
+  pořádku, appka žádnou druhou (`DIRECT_URL`) nepotřebuje (viz bod 5).
 
 Produkční build (`npm run build`) automaticky spouští
 `prisma generate && prisma migrate deploy && next build` — migrace se tedy
@@ -22,35 +20,20 @@ aplikují samy při každém nasazení, appka nikdy neběží se zastaralým sch
 
 ## 2. Co udělat na obrazovce „New Project"
 
-1. **Připoj databázi.** Klikni na nabízenou **Prisma Postgres** (nebo
-   Vercel Postgres/Neon/Supabase — postup níže funguje pro libovolného
-   Postgres providera). Vercel databázi vytvoří a **sám vloží příslušné
-   proměnné prostředí do projektu** — nejčastěji `DATABASE_URL`, případně i
-   `POSTGRES_URL`, `POSTGRES_PRISMA_URL`, `POSTGRES_URL_NON_POOLING` apod.
-   podle konkrétní integrace.
+1. **Připoj databázi.** Klikni na nabízenou **Prisma Postgres**. Vercel
+   databázi vytvoří a sám vloží `DATABASE_URL` do proměnných prostředí
+   projektu.
 
-2. **Zkontroluj/doplň proměnné prostředí** (Project Settings → Environment
-   Variables), tak aby existovaly přesně tyto dvě, se jmény, která appka
-   čte:
-   - `DATABASE_URL` — pokud ji Vercel/Prisma Postgres integrace nastavila
-     rovnou pod tímto jménem, nic neděláš. Pokud ji nastavila pod jiným
-     jménem (např. `POSTGRES_PRISMA_URL`), přidej `DATABASE_URL` jako
-     novou proměnnou a vlož do ní **stejnou hodnotu**.
-   - `DIRECT_URL` — pokud integrace dala samostatné „non-pooling"/„direct"
-     připojení (např. `POSTGRES_URL_NON_POOLING`), zkopíruj jeho hodnotu do
-     `DIRECT_URL`. Pokud žádné samostatné direct připojení nemáš, nastav
-     `DIRECT_URL` na **stejnou hodnotu jako `DATABASE_URL`**.
-
-   Obě proměnné nastav pro **Production** i **Preview** prostředí (pokud
-   plánuješ nasazovat i z jiné větve než produkční).
+2. **Zkontroluj v Project Settings → Environment Variables, že `DATABASE_URL`
+   existuje** a je nastavená pro **Production** (a **Preview**, pokud
+   plánuješ nasazovat i z jiných větví). Nic dalšího přidávat nemusíš.
 
 3. **Build command / Install command** — necháváme výchozí (Vercel je
    automaticky odvodí z `package.json`). Nic zde neměň — `npm run build`
    už obsahuje `prisma generate` i `prisma migrate deploy`.
 
-4. **Nekliкej Deploy, dokud nemáš obě proměnné vyplněné.** Jakmile
-   `DATABASE_URL` a `DIRECT_URL` existují a ukazují na skutečnou databázi
-   → **ano, můžeš kliknout Deploy.** První nasazení při buildu samo spustí
+4. **Jakmile `DATABASE_URL` existuje a ukazuje na skutečnou databázi →
+   ano, můžeš kliknout Deploy.** První nasazení při buildu samo spustí
    migrace z `prisma/migrations/` a vytvoří celé schéma (26 tabulek).
 
 ## 3. Po prvním nasazení — kontrola
@@ -63,7 +46,8 @@ Applying migration `20260919103451_init`
 
 (nebo `No pending migrations to apply` při opakovaném nasazení). Pokud tam
 vidíš chybu o připojení k databázi, zkontroluj bod 2 výše — nejčastější
-příčina je špatně zkopírovaná/chybějící `DIRECT_URL`.
+příčina je, že `DATABASE_URL` chybí nebo je nastavená jen pro jedno
+prostředí (např. jen Preview, ne Production).
 
 Otevři nasazenou appku a projdi:
 - `/` — Nová analýza
@@ -78,15 +62,37 @@ migraci na tvůj lokální Postgres), commitni nový adresář v
 `prisma/migrations/` a pushni. Další nasazení na Vercelu migraci samo
 aplikuje díky `prisma migrate deploy` v build scriptu.
 
-## 5. Poznámky a možné zádrhele
+## 5. Proč appka nepotřebuje DIRECT_URL
 
-- **Connection pooling.** Postgres má omezený počet současných připojení a
-  serverless funkce na Vercelu je mohou snadno vyčerpat. Pokud používáš
-  Prisma Postgres (Accelerate), pooling řeší za tebe. Pokud připojuješ
-  vlastní Postgres (Neon/Supabase/vlastní server), použij jejich pooled
-  connection string (obvykle s `?pgbouncer=true` nebo samostatnou pooler
-  doménou) jako `DATABASE_URL`, a nepoolované přímé připojení jako
-  `DIRECT_URL`.
+Klasický Postgres pooler (PgBouncer v transaction módu, Supabase pooler,
+Neon pooler) neumí přes poolované připojení spouštět příkazy měnící
+schéma (`CREATE TABLE` apod.) — proto se u nich používá dvojice
+`DATABASE_URL` (poolované, pro běžné dotazy) + `DIRECT_URL` (nepoolované,
+jen pro migrace).
+
+**Prisma Postgres funguje jinak** — je to jedna spravovaná služba
+postavená na Prisma Accelerate, která přes svůj jediný connection string
+(`prisma+postgres://…`) podporuje jak běžné dotazy, tak migrace. Proto
+Vercelova integrace žádnou druhou proměnnou nedává a appka žádnou
+nepotřebuje — ověřeno přímo v tomto repu (`prisma migrate deploy` proběhne
+čistě s jen `DATABASE_URL` nastaveným).
+
+Pokud v budoucnu přejdeš na jiného Postgres providera, který používá
+klasický pooler bez podpory migrací přes poolované připojení
+(samostatný Supabase/Neon mimo Prisma Postgres, vlastní server
+s PgBouncer), bude potřeba do `prisma/schema.prisma` do bloku
+`datasource db` přidat zpět:
+
+```prisma
+directUrl = env("DIRECT_URL")
+```
+
+a nastavit `DIRECT_URL` na nepoolované připojení daného providera.
+
+## 6. Další poznámky a možné zádrhele
+
+- **Connection pooling.** Prisma Postgres pooling řeší za tebe (proto
+  stačí jedna proměnná — viz bod 5).
 - **Edge Runtime.** Žádná route v projektu nepoužívá `export const runtime
   = "edge"` — musí to tak zůstat, protože Prisma Client (bez driver
   adapterů, které tento projekt nepoužívá) potřebuje standardní Node.js
@@ -112,16 +118,15 @@ aplikuje díky `prisma migrate deploy` v build scriptu.
   bez explicitně nastaveného a potvrzeného režimu AUTO a reálného
   API klíče (viz `.env.example`).
 
-## 6. Shrnutí — co přesně nastavit ve Vercelu
+## 7. Shrnutí — co přesně nastavit ve Vercelu
 
 | Proměnná | Hodnota |
 |---|---|
-| `DATABASE_URL` | Connection string k tvé Postgres databázi (z Prisma Postgres/Vercel integrace) |
-| `DIRECT_URL` | Přímé/nepoolované připojení; pokud provider nedává samostatné, stejná hodnota jako `DATABASE_URL` |
+| `DATABASE_URL` | Connection string k tvé Prisma Postgres databázi — Vercel ho vloží sám při připojení databáze k projektu |
 
 Vše ostatní z `.env.example` (SMTP, SMS API, Vision API…) je **volitelné** —
 appka bez nich normálně běží, jen příslušné funkce zůstanou v bezpečném
 `PENDING_ACCESS`/`NOT_CONFIGURED` stavu, přesně jako lokálně.
 
-**Až budou `DATABASE_URL` a `DIRECT_URL` v Project Settings vyplněné
-skutečnými hodnotami z tvé databáze → ano, můžeš kliknout Deploy.**
+**`DATABASE_URL` v Project Settings už je vyplněná skutečnou hodnotou z tvé
+Prisma Postgres databáze → ano, můžeš kliknout Deploy.**

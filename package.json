@@ -13,7 +13,7 @@
     "db:migrate": "prisma migrate dev",
     "db:migrate:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",
-    "test": "DATABASE_URL=\"postgresql://postgres:postgres@localhost:5432/dziflip_test\" DIRECT_URL=\"postgresql://postgres:postgres@localhost:5432/dziflip_test\" prisma db push --skip-generate --accept-data-loss --schema=prisma/schema.prisma > /dev/null && vitest run"
+    "test": "DATABASE_URL=\"postgresql://postgres:postgres@localhost:5432/dziflip_test\" prisma db push --skip-generate --accept-data-loss --schema=prisma/schema.prisma > /dev/null && vitest run"
   },
   "dependencies": {
     "@prisma/client": "^5.20.0",

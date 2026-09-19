@@ -3,14 +3,17 @@ generator client {
 }
 
 datasource db {
-  provider  = "postgresql"
-  // Pooled/runtime connection (e.g. Prisma Accelerate's prisma+postgres://,
-  // or a pgbouncer-pooled postgres:// URL). Required.
-  url       = env("DATABASE_URL")
-  // Direct (unpooled) connection, used only for schema migrations
-  // (`prisma migrate deploy` / `migrate dev`). If your provider only gives
-  // you one connection string, set DIRECT_URL to the same value.
-  directUrl = env("DIRECT_URL")
+  provider = "postgresql"
+  // Single connection string for everything — runtime queries AND schema
+  // migrations. Vercel's Prisma Postgres integration provisions exactly
+  // one DATABASE_URL (a prisma+postgres:// Accelerate URL) and nothing
+  // else; Prisma's tooling runs `migrate deploy`/`db push` directly
+  // against it without a separate direct/unpooled connection. If you ever
+  // switch to a self-managed Postgres behind a plain pooler (PgBouncer,
+  // Supabase, Neon) that does NOT support schema changes through the
+  // pooled connection, add a second `directUrl = env("DIRECT_URL")` field
+  // back here pointing at that provider's unpooled connection string.
+  url      = env("DATABASE_URL")
 }
 
 // SQLite has no native enum support in Prisma; statuses are validated in TS (see src/lib/types.ts)

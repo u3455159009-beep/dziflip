@@ -3,4 +3,3 @@
 // into it by the `npm test` script (via docker-compose's db service)
 // before Vitest starts.
 process.env.DATABASE_URL = "postgresql://postgres:postgres@localhost:5432/dziflip_test";
-process.env.DIRECT_URL = "postgresql://postgres:postgres@localhost:5432/dziflip_test";
