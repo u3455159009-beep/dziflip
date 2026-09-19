@@ -70,7 +70,26 @@ export const LISTING_FIELDS = [
   "elevator",
   "orientation",
   "legalNotes",
-  "description"
+  "description",
+  "propertyType",
+  "airConditioning",
+  "electricalRewiring",
+  "masonryCore",
+  "windowsReplacedYear",
+  "insulationYear",
+  "roofYear",
+  "risersYear",
+  "landAreaM2",
+  "zoning",
+  "buildable",
+  "utilitiesAvailable",
+  "accessRoad",
+  "structuresOnLand",
+  "landRestrictions",
+  "garageDimensions",
+  "garageElectricity",
+  "garageLandOwnership",
+  "garageRentNote"
 ] as const;
 export type ListingField = (typeof LISTING_FIELDS)[number];
 
@@ -99,7 +118,26 @@ export const LISTING_FIELD_LABELS: Record<ListingField, string> = {
   elevator: "Výtah",
   orientation: "Orientace",
   legalNotes: "Právní / jiné důležité informace",
-  description: "Popis nemovitosti"
+  description: "Popis nemovitosti",
+  propertyType: "Typ nemovitosti",
+  airConditioning: "Klimatizace",
+  electricalRewiring: "Nové rozvody elektřiny",
+  masonryCore: "Zděné jádro",
+  windowsReplacedYear: "Rok výměny oken",
+  insulationYear: "Rok zateplení",
+  roofYear: "Rok (nové) střechy",
+  risersYear: "Rok výměny stoupaček",
+  landAreaM2: "Plocha pozemku (m²)",
+  zoning: "Územní plán / využití",
+  buildable: "Zastavitelnost",
+  utilitiesAvailable: "Sítě",
+  accessRoad: "Přístupová komunikace",
+  structuresOnLand: "Stavby na pozemku",
+  landRestrictions: "Věcná břemena / omezení",
+  garageDimensions: "Rozměry garáže",
+  garageElectricity: "Elektřina v garáži",
+  garageLandOwnership: "Vlastnictví pozemku (garáž)",
+  garageRentNote: "Nájem pozemku (garáž)"
 };
 
 export const BOOLEAN_FIELDS: ListingField[] = [
@@ -108,8 +146,74 @@ export const BOOLEAN_FIELDS: ListingField[] = [
   "loggia",
   "cellar",
   "parking",
-  "elevator"
+  "elevator",
+  "airConditioning",
+  "electricalRewiring",
+  "masonryCore",
+  "buildable",
+  "garageElectricity"
 ];
+
+// --- Property Type Engine ---
+
+export const PROPERTY_TYPES = ["APARTMENT", "HOUSE", "LAND", "GARAGE", "COMMERCIAL", "OTHER"] as const;
+export type PropertyType = (typeof PROPERTY_TYPES)[number];
+
+export const PROPERTY_TYPE_LABELS: Record<PropertyType, string> = {
+  APARTMENT: "Byt",
+  HOUSE: "Dům",
+  LAND: "Pozemek",
+  GARAGE: "Garáž",
+  COMMERCIAL: "Komerční prostor",
+  OTHER: "Jiné"
+};
+
+// Which LISTING_FIELDS are actually relevant to each property type — used to
+// hide e.g. "patro"/"výtah" for a pozemek or garáž, and to skip apartment
+// fields for a house/pozemek, without maintaining a second field list.
+export const PROPERTY_TYPE_FIELDS: Record<PropertyType, ListingField[]> = {
+  APARTMENT: [
+    "disposition", "areaM2", "floor", "totalFloors", "buildingType", "construction", "ownership",
+    "condition", "buildingCondition", "penb", "balcony", "terrace", "loggia", "cellar", "parking",
+    "elevator", "orientation", "airConditioning", "electricalRewiring", "masonryCore",
+    "windowsReplacedYear", "insulationYear", "roofYear", "risersYear"
+  ],
+  HOUSE: [
+    "disposition", "areaM2", "landAreaM2", "construction", "ownership", "condition", "buildingCondition",
+    "penb", "parking", "orientation", "airConditioning", "electricalRewiring", "windowsReplacedYear",
+    "insulationYear", "roofYear"
+  ],
+  LAND: ["landAreaM2", "zoning", "buildable", "utilitiesAvailable", "accessRoad", "structuresOnLand", "landRestrictions"],
+  GARAGE: ["areaM2", "garageDimensions", "garageElectricity", "garageLandOwnership", "garageRentNote", "condition"],
+  COMMERCIAL: ["areaM2", "construction", "ownership", "condition", "parking", "orientation"],
+  OTHER: [
+    "disposition", "areaM2", "landAreaM2", "construction", "ownership", "condition", "buildingCondition",
+    "penb", "balcony", "terrace", "loggia", "cellar", "parking", "elevator", "orientation"
+  ]
+};
+
+// --- Listing Discovery Engine ---
+
+export const LISTING_MATCH_CONFIDENCES = ["EXACT_MATCH", "HIGH_CONFIDENCE_MATCH", "POSSIBLE_MATCH", "NOT_FOUND"] as const;
+export type ListingMatchConfidence = (typeof LISTING_MATCH_CONFIDENCES)[number];
+
+export const LISTING_MATCH_CONFIDENCE_LABELS: Record<ListingMatchConfidence, string> = {
+  EXACT_MATCH: "Přesná shoda",
+  HIGH_CONFIDENCE_MATCH: "Vysoká jistota shody",
+  POSSIBLE_MATCH: "Možná shoda",
+  NOT_FOUND: "Nenalezeno"
+};
+
+// --- Renovation data status (item 10) ---
+
+export const RENOVATION_DATA_STATUSES = ["KNOWN", "ESTIMATED", "UNKNOWN"] as const;
+export type RenovationDataStatus = (typeof RENOVATION_DATA_STATUSES)[number];
+
+export const RENOVATION_DATA_STATUS_LABELS: Record<RenovationDataStatus, string> = {
+  KNOWN: "Známé (položkový rozpočet)",
+  ESTIMATED: "Odhad (Kč/m²)",
+  UNKNOWN: "Neznámé"
+};
 
 export type FieldMeta = Partial<Record<ListingField, Confidence>>;
 

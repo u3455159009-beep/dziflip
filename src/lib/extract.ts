@@ -30,6 +30,25 @@ export interface ExtractedListing {
     description: string;
     latitude: number;
     longitude: number;
+    propertyType: string;
+    airConditioning: boolean;
+    electricalRewiring: boolean;
+    masonryCore: boolean;
+    windowsReplacedYear: number;
+    insulationYear: number;
+    roofYear: number;
+    risersYear: number;
+    landAreaM2: number;
+    zoning: string;
+    buildable: boolean;
+    utilitiesAvailable: string;
+    accessRoad: string;
+    structuresOnLand: string;
+    landRestrictions: string;
+    garageDimensions: string;
+    garageElectricity: boolean;
+    garageLandOwnership: string;
+    garageRentNote: string;
   }>;
   meta: FieldMeta;
   fullText: string;
@@ -102,6 +121,41 @@ function setField(
 
 function normalizeNumber(raw: string): number {
   return parseFloat(raw.replace(/[\s ]/g, "").replace(",", "."));
+}
+
+// JS regex `\w` is ASCII-only (never matches accented Czech letters, with or
+// without the `u` flag) — so a plain `\w*` silently stops dead the moment a
+// declined Czech word hits an accented letter (e.g. "rodinn\w*" fails on
+// "rodinného"). CZ_W is a word-character class that actually covers Czech,
+// used everywhere a stem needs to absorb a declined suffix.
+const CZ_W = "a-zA-Z0-9_ěščřžýáíéůúťďňĚŠČŘŽÝÁÍÉŮÚŤĎŇ";
+
+// --- Property Type Engine (item 2) — detected from explicit keywords only,
+// never inferred from ambiguous context. Order matters: more specific
+// phrases (e.g. "garáž") are checked before the generic "byt" fallback.
+const PROPERTY_TYPE_KEYWORDS: Array<[RegExp, string]> = [
+  [/gar[aá]ž/i, "GARAGE"],
+  [new RegExp(`\\bpozemk[${CZ_W}]*\\b|\\bparcel[ae]\\b`, "i"), "LAND"],
+  [new RegExp(`rodinn[${CZ_W}]*\\s+d[oů]m[${CZ_W}]*|\\bchalup[${CZ_W}]*\\b|\\bvil[ae]\\b`, "i"), "HOUSE"],
+  [/kancelář|komerční\s+prostor|obchodní\s+prostor|sklad(?:ový)?\s+prostor|provozovn[ay]/i, "COMMERCIAL"],
+  [new RegExp(`\\bbyt[${CZ_W}]*\\b|\\b[1-6]\\s*\\+\\s*(?:kk|1)\\b`, "i"), "APARTMENT"]
+];
+
+export function detectPropertyType(text: string): string | null {
+  for (const [re, type] of PROPERTY_TYPE_KEYWORDS) {
+    if (re.test(text)) return type;
+  }
+  return null;
+}
+
+const CURRENT_YEAR = new Date().getFullYear();
+
+function extractYear(text: string, re: RegExp): number | null {
+  const m = text.match(re);
+  if (!m) return null;
+  const year = parseInt(m[1], 10);
+  if (year < 1900 || year > CURRENT_YEAR + 1) return null;
+  return year;
 }
 
 export function extractFromText(text: string, sourceUrl?: string | null): ExtractedListing {
@@ -248,6 +302,66 @@ export function extractFromText(text: string, sourceUrl?: string | null): Extrac
   // --- Street (only from explicit label to avoid guessing) ---
   const streetMatch = t.match(/(?:^|\n)\s*(?:Ulice|Adresa)\s*[:\-]\s*([^\n]{3,60})/i);
   if (streetMatch) setField(fields, meta, "street", streetMatch[1].trim(), "VERIFIED");
+
+  // --- Property type (item 2) ---
+  const propertyType = detectPropertyType(t);
+  if (propertyType) setField(fields, meta, "propertyType", propertyType, "ESTIMATED");
+
+  // --- Extended renovation-history signals (item 3) — never guessed, only
+  // ever set from an explicit textual mention. ---
+  if (/klimatizac/i.test(t)) setField(fields, meta, "airConditioning", true, "VERIFIED");
+  if (/nov[eé]\s+rozvody\s+elektřiny|nov[aá]\s+elektroinstalac/i.test(t)) {
+    setField(fields, meta, "electricalRewiring", true, "VERIFIED");
+  }
+  if (/zděn[eé]\s+jádro/i.test(t)) setField(fields, meta, "masonryCore", true, "VERIFIED");
+  else if (/(?:panelov|umakartov)[eé]\s+jádro/i.test(t)) setField(fields, meta, "masonryCore", false, "VERIFIED");
+
+  const windowsYear = extractYear(
+    t,
+    new RegExp(`(?:výměn[${CZ_W}]*|vyměněn[${CZ_W}]*|nov[aá])\\s+ok[${CZ_W}]*\\D{0,15}(\\d{4})`, "i")
+  );
+  if (windowsYear) setField(fields, meta, "windowsReplacedYear", windowsYear, "VERIFIED");
+
+  const insulationYear = extractYear(t, /zateplen\w*\D{0,15}(\d{4})/i);
+  if (insulationYear) setField(fields, meta, "insulationYear", insulationYear, "VERIFIED");
+
+  const roofYear = extractYear(t, /(?:nov[aá]|vyměněn\w*|rekonstruovan\w*)\s+střech\w*\D{0,15}(\d{4})|střech\w*\D{0,15}(\d{4})/i);
+  if (roofYear) setField(fields, meta, "roofYear", roofYear, "VERIFIED");
+
+  const risersYear = extractYear(t, /stoupačk\w*\D{0,15}(\d{4})/i);
+  if (risersYear) setField(fields, meta, "risersYear", risersYear, "VERIFIED");
+
+  // --- Land / house area (m² pozemku, distinct from the apartment-style areaM2) ---
+  const landAreaMatch = t.match(/plocha\s+pozemku[^\d]{0,25}(\d{1,6}(?:[.,]\d+)?)\s*m/i);
+  if (landAreaMatch) setField(fields, meta, "landAreaM2", normalizeNumber(landAreaMatch[1]), "VERIFIED");
+
+  // --- LAND-specific fields ---
+  if (propertyType === "LAND") {
+    if (/(?:je\s+)?zastaviteln/i.test(t)) setField(fields, meta, "buildable", true, "VERIFIED");
+    else if (/nen[ií]\s+zastaviteln|nezastaviteln/i.test(t)) setField(fields, meta, "buildable", false, "VERIFIED");
+
+    const zoningMatch = t.match(/územní\s+plán[^\n:]{0,10}?[:\-]?\s*([^\n.]{3,80})/i);
+    if (zoningMatch) setField(fields, meta, "zoning", zoningMatch[1].trim(), "VERIFIED");
+
+    const utilities: string[] = [];
+    if (/\belektřin\w*\s+(?:na\s+pozemku|v\s+dosahu|přípojk\w*)/i.test(t) || /přípojka\s+elektřiny/i.test(t)) utilities.push("elektřina");
+    if (/vodovod|přípojka\s+vody/i.test(t)) utilities.push("voda");
+    if (/plynovod|přípojka\s+plynu/i.test(t)) utilities.push("plyn");
+    if (/kanalizac/i.test(t)) utilities.push("kanalizace");
+    if (utilities.length > 0) setField(fields, meta, "utilitiesAvailable", utilities.join(", "), "VERIFIED");
+
+    if (/přístupov[aá]\s+(?:komunikace|cesta)[^\n:]{0,10}?[:\-]?\s*([^\n.]{3,60})/i.test(t)) {
+      const m = t.match(/přístupov[aá]\s+(?:komunikace|cesta)[^\n:]{0,10}?[:\-]?\s*([^\n.]{3,60})/i);
+      if (m) setField(fields, meta, "accessRoad", m[1].trim(), "VERIFIED");
+    }
+  }
+
+  // --- GARAGE-specific fields ---
+  if (propertyType === "GARAGE") {
+    const dimMatch = t.match(/(\d{1,2}(?:[.,]\d+)?\s*x\s*\d{1,2}(?:[.,]\d+)?\s*m)/i);
+    if (dimMatch) setField(fields, meta, "garageDimensions", dimMatch[1].trim(), "VERIFIED");
+    if (/elektřin/i.test(t)) setField(fields, meta, "garageElectricity", true, "VERIFIED");
+  }
 
   return {
     fields,

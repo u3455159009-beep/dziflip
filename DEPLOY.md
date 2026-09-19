@@ -118,7 +118,46 @@ a nastavit `DIRECT_URL` na nepoolované připojení daného providera.
   bez explicitně nastaveného a potvrzeného režimu AUTO a reálného
   API klíče (viz `.env.example`).
 
-## 7. Shrnutí — co přesně nastavit ve Vercelu
+## 7. Real Data Engine — aktivace automatického vyhledávání srovnatelných nabídek
+
+DziFlip má kompletní architekturu pro automatické vyhledávání srovnatelných
+nabídek (Comparable Discovery Engine) a dohledání původního inzerátu
+(Listing Discovery Engine) — ale bez připojeného REAL zdroje dat **nikdy nic
+nevymýšlí ani nescrapuje**. `/settings` → sekce **Provider Health** vždy
+ukazuje pravdivý stav (PŘIPOJENO / ČEKÁ NA PŘÍSTUP / CHYBA) každého zdroje.
+
+Portály Sreality.cz, Bezrealitky.cz a Reality.iDNES.cz nemají veřejné,
+ToS-souhlasné API pro hromadné stahování nabídek — proto zůstávají
+`PENDING_ACCESS` natrvalo, dokud nezískáš oficiální partnerský přístup.
+
+Jediný zdroj, který lze aktivovat bez portálového partnerství, je
+**`WEB_SEARCH`** (`src/lib/sources/searchProvider.ts`) — obecný provider nad
+libovolným licencovaným vyhledávacím/realitním datovým API (např. SERP API
+nebo agregátor realitních dat), který ale musíš mít vlastní. Aktivace:
+
+1. Nastav v proměnných prostředí `SEARCH_API_KEY` (a volitelně
+   `SEARCH_API_URL`, pokud tvé API neběží na výchozí adrese v kódu).
+2. API musí na `GET {SEARCH_API_URL}?municipality=...&district=...&...`
+   (s `Authorization: Bearer {SEARCH_API_KEY}`) vracet JSON ve tvaru:
+   ```json
+   { "results": [
+     { "url": "...", "title": "...", "price": 7490000, "areaM2": 64.3,
+       "disposition": "2+1", "municipality": "Brno", "district": "Královo Pole",
+       "condition": "Dobrý stav", "portal": "...", "photos": ["..."],
+       "publishedAt": "2026-01-01T00:00:00Z", "description": "..." }
+   ] }
+   ```
+   Chybějící pole appka nikdy nedoplňuje odhadem — položka bez `url`/`price`/
+   `areaM2`/`disposition`/`municipality` se zahodí, ne vyplní naslepo.
+3. Po nastavení klíče se `WEB_SEARCH` v Provider Health automaticky přepne
+   na PŘIPOJENO a Comparable Discovery Engine i Listing Discovery Engine ho
+   začnou používat — nic dalšího v kódu není potřeba měnit.
+
+Bez tohoto klíče appka i nadále funguje — jen srovnatelné nabídky je nutné
+doplňovat ručně (formulář „+ Přidat ručně" u Cenového enginu), přesně jako
+dosud.
+
+## 8. Shrnutí — co přesně nastavit ve Vercelu
 
 | Proměnná | Hodnota |
 |---|---|

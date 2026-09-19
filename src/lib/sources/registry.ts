@@ -3,9 +3,11 @@ import { mockDemoProvider } from "./mockProvider";
 import { srealityProvider } from "./srealityProvider";
 import { bezrealitkyProvider } from "./bezrealitkyProvider";
 import { realityIdnesProvider } from "./realityIdnesProvider";
+import { webSearchProvider } from "./searchProvider";
 
 export const SOURCE_PROVIDERS: ListingSourceProvider[] = [
   mockDemoProvider,
+  webSearchProvider,
   srealityProvider,
   bezrealitkyProvider,
   realityIdnesProvider

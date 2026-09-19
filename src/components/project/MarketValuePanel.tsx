@@ -56,6 +56,17 @@ function Estimate({ title, subtitle, estimate }: { title: string; subtitle: stri
           </div>
         </>
       )}
+      <div className="mt-3 border-t border-line/60 pt-3 text-xs text-muted">
+        Nalezeno celkem {estimate.totalFound} srovnání, z toho vyřazeno {estimate.rejectedOutlierCount} jako
+        statistický outlier (IQR metoda).
+        {estimate.rejectedOutliers.length > 0 && (
+          <ul className="mt-1.5 list-disc space-y-0.5 pl-4">
+            {estimate.rejectedOutliers.map((o, i) => (
+              <li key={i}>{o.reason}</li>
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
   );
 }

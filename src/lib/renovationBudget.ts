@@ -3,6 +3,24 @@
 // listed as an explicit uncertainty instead of being folded into LOW/
 // EXPECTED/HIGH. The range itself is a transparent, fixed execution-risk
 // band (−12 % / +20 %) applied only to fully-specified positions.
+import type { RenovationDataStatus } from "./types";
+
+/**
+ * Renovation data status (item 10) — distinguishes a real, itemized budget
+ * (KNOWN) from a rough per-m² assumption typed into "Náklady rekonstrukce"
+ * with no line items behind it (ESTIMATED) from having neither (UNKNOWN).
+ * A dashboard must never present an ESTIMATED or UNKNOWN number as if it
+ * were a verified renovation cost.
+ */
+export function computeRenovationDataStatus(input: {
+  knownBudgetItemCount: number;
+  renovationCostAssumption: number | null;
+}): RenovationDataStatus {
+  if (input.knownBudgetItemCount > 0) return "KNOWN";
+  if (input.renovationCostAssumption != null && input.renovationCostAssumption > 0) return "ESTIMATED";
+  return "UNKNOWN";
+}
+
 export interface BudgetRangeInput {
   name: string;
   total: number | null;

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeBudgetRange } from "@/lib/renovationBudget";
+import { computeBudgetRange, computeRenovationDataStatus } from "@/lib/renovationBudget";
 
 describe("computeBudgetRange", () => {
   it("returns null bands when no item has a computed total", () => {
@@ -35,5 +35,27 @@ describe("computeBudgetRange", () => {
     const items = [{ name: "Elektroinstalace", total: 80000, priceSource: "ESTIMATE" }];
     const result = computeBudgetRange(items);
     expect(result.explanation).toMatch(/ODHAD/);
+  });
+});
+
+describe("computeRenovationDataStatus (item 10) — 0 Kč must never be presented as a real renovation cost", () => {
+  it("is UNKNOWN when there are no budget items and no per-m² assumption", () => {
+    const status = computeRenovationDataStatus({ knownBudgetItemCount: 0, renovationCostAssumption: null });
+    expect(status).toBe("UNKNOWN");
+  });
+
+  it("is UNKNOWN when the renovation cost assumption is exactly 0 Kč — that's absence of data, not a real 0 Kč renovation", () => {
+    const status = computeRenovationDataStatus({ knownBudgetItemCount: 0, renovationCostAssumption: 0 });
+    expect(status).toBe("UNKNOWN");
+  });
+
+  it("is ESTIMATED when a positive per-m² cost was typed in but no itemized budget exists yet", () => {
+    const status = computeRenovationDataStatus({ knownBudgetItemCount: 0, renovationCostAssumption: 350000 });
+    expect(status).toBe("ESTIMATED");
+  });
+
+  it("is KNOWN once at least one real itemized budget line exists, regardless of the rough assumption", () => {
+    const status = computeRenovationDataStatus({ knownBudgetItemCount: 3, renovationCostAssumption: 350000 });
+    expect(status).toBe("KNOWN");
   });
 });

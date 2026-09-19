@@ -31,6 +31,13 @@ export interface PhotoDTO {
   generations: PhotoGenerationDTO[];
 }
 
+export interface ComparablePriceHistoryDTO {
+  id: string;
+  comparableId: string;
+  price: number | null;
+  recordedAt: string;
+}
+
 export interface ComparableDTO {
   id: string;
   projectId: string;
@@ -60,6 +67,11 @@ export interface ComparableDTO {
   similarityScore: number | null;
   similarityBreakdown: string | null;
   qualityTier: string | null;
+  sourceProvider: string | null;
+  lastSeenAt: string;
+  isOutlier: boolean;
+  outlierReason: string | null;
+  priceHistory: ComparablePriceHistoryDTO[];
 }
 
 export interface ListingEventDTO {
@@ -310,6 +322,30 @@ export interface ProjectDTO {
   fieldMeta: string | null;
   fieldSource: string | null;
   targetPrice: number | null;
+  propertyType: string | null;
+  airConditioning: boolean | null;
+  electricalRewiring: boolean | null;
+  masonryCore: boolean | null;
+  windowsReplacedYear: number | null;
+  insulationYear: number | null;
+  roofYear: number | null;
+  risersYear: number | null;
+  landAreaM2: number | null;
+  zoning: string | null;
+  buildable: boolean | null;
+  utilitiesAvailable: string | null;
+  accessRoad: string | null;
+  structuresOnLand: string | null;
+  landRestrictions: string | null;
+  garageDimensions: string | null;
+  garageElectricity: boolean | null;
+  garageLandOwnership: string | null;
+  garageRentNote: string | null;
+  discoveredListingUrl: string | null;
+  discoveredListingConfidence: string | null;
+  discoveredListingReasons: string | null;
+  lastComparableDiscoveryAt: string | null;
+  comparableDiscoveryNote: string | null;
   externalId: string | null;
   isDemo: boolean;
   sourceWatcherId: string | null;

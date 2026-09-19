@@ -88,7 +88,8 @@ const BAND_STYLES: Record<FlipBand, string> = {
   BUY_NOW: "bg-band-hotBg border-band-hot/40 text-band-hot",
   GOOD: "bg-band-goodBg border-band-good/40 text-band-good",
   NORMAL: "bg-band-normalBg border-band-normal/40 text-band-normal",
-  BAD: "bg-band-badBg border-band-bad/40 text-band-bad"
+  BAD: "bg-band-badBg border-band-bad/40 text-band-bad",
+  UNKNOWN: "bg-beige-50 border-line text-muted"
 };
 
 export function EconomicsSection({
@@ -116,14 +117,17 @@ export function EconomicsSection({
     setA((prev) => ({ ...prev, [key]: v }));
   }
 
-  const purchasePrice = a.purchasePriceUsed ?? 0;
+  // A missing purchase price is unknown, never 0 Kč (item 13) — an
+  // "acquired for free" phantom would otherwise inflate every profit figure.
+  const purchasePrice: number | null = a.purchasePriceUsed && a.purchasePriceUsed > 0 ? a.purchasePriceUsed : null;
   const maxBuy = useMemo(() => computeMaxBuyPrice(a), [a]);
   const bands = useMemo(() => computeBands(a), [a]);
-  const currentBand = useMemo(() => classifyPrice(purchasePrice, bands), [purchasePrice, bands]);
-  const economics = useMemo(() => computeEconomics(purchasePrice, a, areaM2), [purchasePrice, a, areaM2]);
-  const matrix = useMemo(() => computeSensitivityMatrix(purchasePrice, a), [purchasePrice, a]);
+  const currentBand = useMemo(() => (purchasePrice !== null ? classifyPrice(purchasePrice, bands) : "UNKNOWN"), [purchasePrice, bands]);
+  const economics = useMemo(() => (purchasePrice !== null ? computeEconomics(purchasePrice, a, areaM2) : null), [purchasePrice, a, areaM2]);
+  const matrix = useMemo(() => (purchasePrice !== null ? computeSensitivityMatrix(purchasePrice, a) : []), [purchasePrice, a]);
 
   const hasSaleData = a.saleBase !== null && a.saleBase !== undefined && a.saleBase > 0;
+  const bandsKnown = bands.goodThreshold !== null;
 
   return (
     <div className="space-y-8">
@@ -177,9 +181,10 @@ export function EconomicsSection({
         <SectionTitle subtitle="Pásma jsou vypočítána z konzervativní prodejní ceny a vašich minimálních požadavků na zisk, marži a ROI.">
           Flip Score
         </SectionTitle>
-        {!hasSaleData ? (
+        {!bandsKnown ? (
           <p className="text-sm text-muted">
-            Doplňte konzervativní a základní prodejní cenu, aby bylo možné vypočítat cenová pásma.
+            Doplňte konzervativní prodejní cenu (ručně, nebo automaticky z Tržní hodnoty / ARV výše), aby bylo možné
+            vypočítat cenová pásma.
           </p>
         ) : (
           <>
@@ -214,14 +219,26 @@ export function EconomicsSection({
           Maximální nákupní cena
         </SectionTitle>
         <div className="font-serif text-4xl text-ink number-tabular">
-          {Number.isFinite(maxBuy) ? formatCZK(maxBuy) : "—"}
+          {maxBuy !== null ? formatCZK(maxBuy) : "—"}
         </div>
+        {maxBuy === null && (
+          <p className="mt-2 text-sm text-muted">
+            Nelze vypočítat — chybí konzervativní prodejní cena (doplňte ji ručně, nebo počkejte na automatický
+            odhad z Tržní hodnoty / ARV, jakmile bude dost srovnatelných nabídek).
+          </p>
+        )}
       </Card>
 
       <Card>
         <SectionTitle subtitle="Nabídkové ceny scénářů nejsou jistotou. Optimistický scénář neprezentujeme jako pravděpodobný výsledek.">
           Ekonomika flipu
         </SectionTitle>
+        {!economics ? (
+          <p className="text-sm text-muted">
+            Nelze vypočítat — chybí kupní cena (doplňte ji ručně výše, nebo cílovou/nabídkovou cenu na začátku stránky).
+          </p>
+        ) : (
+        <>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[640px] text-sm">
             <tbody>
@@ -282,12 +299,17 @@ export function EconomicsSection({
             </tbody>
           </table>
         </div>
+        </>
+        )}
       </Card>
 
       <Card>
         <SectionTitle subtitle="Osa X: změna prodejní ceny. Osa Y: změna nákladů rekonstrukce. V každém políčku je výsledný hrubý zisk (základní prodejní cena, aktuální kupní cena).">
           Citlivostní analýza
         </SectionTitle>
+        {matrix.length === 0 ? (
+          <p className="text-sm text-muted">Nelze vypočítat — chybí základní prodejní cena.</p>
+        ) : (
         <div className="overflow-x-auto">
           <table className="w-full min-w-[640px] text-sm number-tabular">
             <thead>
@@ -325,6 +347,7 @@ export function EconomicsSection({
             </tbody>
           </table>
         </div>
+        )}
       </Card>
     </div>
   );
@@ -340,6 +363,8 @@ function bandRangeLabel(band: FlipBand, bands: ReturnType<typeof computeBands>):
       return `${formatCZK(bands.goodThreshold)} – ${formatCZK(bands.normalThreshold)}`;
     case "BAD":
       return `nad ${formatCZK(bands.normalThreshold)}`;
+    case "UNKNOWN":
+      return "—";
   }
 }
 

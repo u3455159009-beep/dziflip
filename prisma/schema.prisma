@@ -46,6 +46,9 @@ datasource db {
 // PhotoGenerationStatus: NOT_CONFIGURED | PENDING | GENERATED | FAILED
 // PhotoGenerationStyle: LEVNY_FLIP | MODERNI | PREMIUM | MINIMALISTICKY | SCANDI | LUXURY | CUSTOM
 // ProductRequirementStatus: NEEDED | SELECTED | TO_BUY | ORDERED | BOUGHT | PICKED_UP | INSTALLED
+// PropertyType: APARTMENT | HOUSE | LAND | GARAGE | COMMERCIAL | OTHER
+// ListingMatchConfidence: EXACT_MATCH | HIGH_CONFIDENCE_MATCH | POSSIBLE_MATCH | NOT_FOUND
+// RenovationDataStatus: KNOWN | ESTIMATED | UNKNOWN
 // ShoppingCategory: STAVEBNI_MATERIAL | KOUPELNA | KUCHYN | OSVETLENI | NABYTEK | SPOTREBICE | DEKORACE | OSTATNI
 // ProductCategory: PODLAHY | LISTY | BARVY | OBKLADY | DLAZBY | LEPIDLA | SPAROVACI_HMOTY | SVETLA | ZASUVKY |
 //   VYPINACE | DVERE | KLIKY | SANITA | WC | UMYVADLA | SPRCHY | VANY | VODOVODNI_BATERIE | KUCHYNE |
@@ -96,6 +99,52 @@ model Project {
   description       String? // cleaned listing description, when separable from fullText
   latitude          Float? // only ever set from real structured source data (e.g. JSON-LD), never guessed
   longitude         Float?
+
+  // Property Type Engine — auto-detected from text, correctable manually.
+  // APARTMENT | HOUSE | LAND | GARAGE | COMMERCIAL | OTHER. UI shows only
+  // the attribute set relevant to this type (e.g. never "floor"/"elevator"
+  // for LAND or GARAGE).
+  propertyType String?
+
+  // Extended extraction (item 3) — renovation-history signals, never
+  // guessed: each is only ever set from an explicit textual mention.
+  airConditioning        Boolean? // klimatizace
+  electricalRewiring     Boolean? // nové rozvody elektřiny
+  masonryCore            Boolean? // zděné jádro (vs. original panel core)
+  windowsReplacedYear    Int? // rok výměny oken
+  insulationYear         Int? // rok zateplení
+  roofYear               Int? // rok (nové) střechy
+  risersYear             Int? // rok výměny stoupaček
+
+  // HOUSE / LAND — building vs. land plot area are tracked separately from
+  // the apartment-oriented areaM2 (which for a house means usable floor area).
+  landAreaM2 Float?
+
+  // LAND-specific
+  zoning            String? // územní plán / využití pozemku
+  buildable         Boolean? // zastavitelnost
+  utilitiesAvailable String? // sítě (voda/plyn/elektřina/kanalizace) — free text, never inferred
+  accessRoad        String? // přístupová komunikace
+  structuresOnLand  String? // stavby na pozemku
+  landRestrictions  String? // věcná břemena / omezení
+
+  // GARAGE-specific
+  garageDimensions    String?
+  garageElectricity   Boolean?
+  garageLandOwnership String? // vlastnictví pozemku pod garáží
+  garageRentNote      String? // poznámka k případnému nájmu pozemku
+
+  // Listing Discovery Engine (item 1) — best-effort match of a pasted
+  // text-only listing to its publicly findable original, found only via an
+  // ACTIVE search provider. Never claims a match without one.
+  discoveredListingUrl        String?
+  discoveredListingConfidence String? // EXACT_MATCH | HIGH_CONFIDENCE_MATCH | POSSIBLE_MATCH | NOT_FOUND
+  discoveredListingReasons    String? // JSON array of human-readable match reasons
+
+  // Comparable Discovery Engine (item 4) — cache bookkeeping so re-opening a
+  // project doesn't re-run provider discovery on every page load.
+  lastComparableDiscoveryAt   DateTime?
+  comparableDiscoveryNote     String? // e.g. "žádný aktivní zdroj srovnání" — always shown to the user, never silent
 
   // JSON map of fieldName -> DataConfidence, stored as string
   fieldMeta   String?
@@ -436,6 +485,27 @@ model Comparable {
   similarityScore     Float? // 0-1, cached — see src/lib/comparableEngine.ts for the formula
   similarityBreakdown String? // JSON: { locality, area, disposition, condition, ... } each 0-1
   qualityTier         String? // HIGH | MEDIUM | LOW
+
+  // Comparable Discovery Engine cache/history (item 15) — a manually-added
+  // comparable simply has sourceProvider null and lastSeenAt == foundAt.
+  sourceProvider String? // provider key that found it, e.g. "SREALITY" — null for manual entries
+  lastSeenAt     DateTime @default(now()) // last discovery run that re-confirmed this listing still exists at this price
+  isOutlier      Boolean  @default(false) // excluded from Market Value stats by IQR outlier detection (item 7)
+  outlierReason  String?
+
+  priceHistory ComparablePriceHistory[]
+
+  @@unique([projectId, url])
+}
+
+// Comparable price-drop tracking (item 15) — a row is only ever added when a
+// later discovery run re-finds the same URL at a different price.
+model ComparablePriceHistory {
+  id           String     @id @default(cuid())
+  comparableId String
+  comparable   Comparable @relation(fields: [comparableId], references: [id], onDelete: Cascade)
+  price        Float?
+  recordedAt   DateTime   @default(now())
 }
 
 model BudgetItem {

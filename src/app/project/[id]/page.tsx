@@ -34,6 +34,7 @@ export default async function ProjectPage({ params }: { params: { id: string } }
       marketValue={marketValue}
       arv={arv}
       staleDataThresholdDays={settings.staleDataThresholdDays}
+      minCompCount={settings.minCompCount}
     />
   );
 }

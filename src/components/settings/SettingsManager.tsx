@@ -12,6 +12,7 @@ import {
   type CompQualityTier
 } from "@/lib/types";
 import { formatDate } from "@/lib/format";
+import { ProviderHealthPanel } from "./ProviderHealthPanel";
 
 export interface SettingsDTO {
   defaultMinProfit: number | null;
@@ -500,6 +501,8 @@ export function SettingsManager({
           onBlur={(e) => patchSettings({ shoppingReferenceLocality: e.target.value || null })}
         />
       </Card>
+
+      <ProviderHealthPanel />
     </div>
   );
 }

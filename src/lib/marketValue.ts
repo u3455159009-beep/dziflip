@@ -60,6 +60,48 @@ function weightedMedian(values: Array<{ value: number; weight: number }>): numbe
   return sorted[sorted.length - 1].value;
 }
 
+// --- Outlier removal (item 7) — a transparent, standard IQR fence. One
+// absurdly cheap or expensive listing must never swing the whole estimate;
+// this never silently drops data — every rejection is reported back to the
+// caller (see removeOutliers) so the user can see exactly what was excluded
+// and why.
+export interface OutlierResult<T> {
+  kept: T[];
+  rejected: Array<{ item: T; pricePerM2: number; reason: string }>;
+}
+
+export function removeOutliers<T extends { pricePerM2: number | null }>(items: T[]): OutlierResult<T> {
+  const withPrice = items.filter((i): i is T & { pricePerM2: number } => typeof i.pricePerM2 === "number" && i.pricePerM2 > 0);
+  // IQR fencing needs a reasonably sized sample to be meaningful — with
+  // fewer than 4 points every value is kept rather than arbitrarily
+  // discarding half the (already thin) sample.
+  if (withPrice.length < 4) return { kept: items, rejected: [] };
+
+  const sorted = [...withPrice].map((i) => i.pricePerM2).sort((a, b) => a - b);
+  const q1 = percentile(sorted, 0.25)!;
+  const q3 = percentile(sorted, 0.75)!;
+  const iqr = q3 - q1;
+  const lowFence = q1 - 1.5 * iqr;
+  const highFence = q3 + 1.5 * iqr;
+
+  const kept: T[] = [];
+  const rejected: OutlierResult<T>["rejected"] = [];
+  for (const item of items) {
+    if (typeof item.pricePerM2 !== "number" || item.pricePerM2 <= 0) {
+      kept.push(item); // no price to judge — not an outlier, just unpriced
+      continue;
+    }
+    if (item.pricePerM2 < lowFence) {
+      rejected.push({ item, pricePerM2: item.pricePerM2, reason: `neobvykle nízká cena (${Math.round(item.pricePerM2).toLocaleString("cs-CZ")} Kč/m² je pod dolní mezí ${Math.round(lowFence).toLocaleString("cs-CZ")} Kč/m²)` });
+    } else if (item.pricePerM2 > highFence) {
+      rejected.push({ item, pricePerM2: item.pricePerM2, reason: `neobvykle vysoká cena (${Math.round(item.pricePerM2).toLocaleString("cs-CZ")} Kč/m² je nad horní mezí ${Math.round(highFence).toLocaleString("cs-CZ")} Kč/m²)` });
+    } else {
+      kept.push(item);
+    }
+  }
+  return { kept, rejected };
+}
+
 export function computePricePerM2Stats(comps: MarketValueComparable[]): PricePerM2Stats {
   const valid = comps.filter((c): c is MarketValueComparable & { pricePerM2: number } => typeof c.pricePerM2 === "number" && c.pricePerM2 > 0);
   if (valid.length === 0) return { ...EMPTY_STATS };
@@ -110,9 +152,19 @@ export interface MarketValueEstimate {
   confidence: MarketValueConfidence;
   insufficientData: boolean;
   explanation: string;
+  // Outlier removal (item 7) — always reported, even when insufficient.
+  totalFound: number;
+  rejectedOutlierCount: number;
+  rejectedOutliers: Array<{ pricePerM2: number; reason: string }>;
 }
 
-function insufficientEstimate(areaM2: number | null, usableCount: number, required: number): MarketValueEstimate {
+function insufficientEstimate(
+  areaM2: number | null,
+  usableCount: number,
+  required: number,
+  totalFound: number,
+  rejectedOutliers: Array<{ pricePerM2: number; reason: string }>
+): MarketValueEstimate {
   const msg = `NEDOSTATEK DAT PRO SPOLEHLIVÝ ODHAD — nalezeno pouze ${usableCount} srovnatelných nabídek dostatečné kvality, potřeba alespoň ${required}.`;
   return {
     areaM2,
@@ -126,7 +178,10 @@ function insufficientEstimate(areaM2: number | null, usableCount: number, requir
     high: { value: null, explanation: msg },
     confidence: "LOW",
     insufficientData: true,
-    explanation: msg
+    explanation: msg,
+    totalFound,
+    rejectedOutlierCount: rejectedOutliers.length,
+    rejectedOutliers
   };
 }
 
@@ -134,18 +189,24 @@ function insufficientEstimate(areaM2: number | null, usableCount: number, requir
  * Computes CONSERVATIVE/BASE/HIGH Kč value bands from a set of already-scored
  * comparables. Prefers HIGH-quality-tier comparables when there are enough of
  * them; otherwise falls back to all comparables meeting `minCompQuality`.
- * Returns an insufficient-data result (all value bands null) when there
- * aren't enough usable comparables — never fabricates a number.
+ * Extreme prices (IQR outliers, item 7) are excluded before any stats are
+ * computed, and the exact found/used/rejected counts are always reported —
+ * never silently dropped. Returns an insufficient-data result (all value
+ * bands null) when there aren't enough usable comparables — never fabricates
+ * a number.
  */
 export function computeMarketValue(
   comparables: MarketValueComparable[],
   areaM2: number | null,
   opts: MarketValueOptions
 ): MarketValueEstimate {
-  const usable = comparables.filter((c) => c.qualityTier && meetsMinQuality(c.qualityTier, opts.minCompQuality));
+  const totalFound = comparables.length;
+  const byQuality = comparables.filter((c) => c.qualityTier && meetsMinQuality(c.qualityTier, opts.minCompQuality));
+  const { kept: usable, rejected: outliers } = removeOutliers(byQuality);
+  const rejectedOutliers = outliers.map((o) => ({ pricePerM2: o.pricePerM2, reason: o.reason }));
 
   if (usable.length < opts.minCompCount || !areaM2 || areaM2 <= 0) {
-    return insufficientEstimate(areaM2, usable.length, opts.minCompCount);
+    return insufficientEstimate(areaM2, usable.length, opts.minCompCount, totalFound, rejectedOutliers);
   }
 
   const highTier = usable.filter((c) => c.qualityTier === "HIGH");
@@ -153,7 +214,7 @@ export function computeMarketValue(
   const stats = computePricePerM2Stats(statsSource);
 
   if (!stats.weightedMedian) {
-    return insufficientEstimate(areaM2, usable.length, opts.minCompCount);
+    return insufficientEstimate(areaM2, usable.length, opts.minCompCount, totalFound, rejectedOutliers);
   }
 
   const askingCount = statsSource.filter((c) => c.priceType === "ASKING").length;
@@ -190,7 +251,10 @@ export function computeMarketValue(
     },
     confidence,
     insufficientData: false,
-    explanation: baseExplanation
+    explanation: baseExplanation,
+    totalFound,
+    rejectedOutlierCount: rejectedOutliers.length,
+    rejectedOutliers
   };
 }
 

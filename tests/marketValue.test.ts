@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeMarketValue, computeARV, computePricePerM2Stats, type MarketValueComparable } from "@/lib/marketValue";
+import { computeMarketValue, computeARV, computePricePerM2Stats, removeOutliers, type MarketValueComparable } from "@/lib/marketValue";
 
 const opts = { minCompCount: 3, minCompQuality: "MEDIUM" as const };
 
@@ -89,6 +89,34 @@ describe("computeARV", () => {
     const comps = Array.from({ length: 8 }, () => mkComp(150000, { condition: "po rekonstrukci" }));
     const arv = computeARV(comps, 70, opts);
     expect(arv.confidence).not.toBe("HIGH");
+  });
+});
+
+describe("removeOutliers (item 7)", () => {
+  it("excludes an extreme value using the IQR fence and reports why", () => {
+    const items = [{ pricePerM2: 100000 }, { pricePerM2: 102000 }, { pricePerM2: 98000 }, { pricePerM2: 500000 }];
+    const { kept, rejected } = removeOutliers(items);
+    expect(kept.length).toBe(3);
+    expect(rejected.length).toBe(1);
+    expect(rejected[0].pricePerM2).toBe(500000);
+    expect(rejected[0].reason).toMatch(/neobvykle vysoká/);
+  });
+
+  it("never discards data from a thin sample (fewer than 4 priced items)", () => {
+    const items = [{ pricePerM2: 100000 }, { pricePerM2: 102000 }, { pricePerM2: 9000000 }];
+    const { kept, rejected } = removeOutliers(items);
+    expect(kept.length).toBe(3);
+    expect(rejected.length).toBe(0);
+  });
+
+  it("reports found/used/rejected counts on the market value estimate", () => {
+    const comps = [mkComp(100000), mkComp(102000), mkComp(98000), mkComp(101000), mkComp(2000000)];
+    const result = computeMarketValue(comps, 70, opts);
+    expect(result.totalFound).toBe(5);
+    expect(result.rejectedOutlierCount).toBe(1);
+    expect(result.insufficientData).toBe(false);
+    // the 2 000 000 Kč/m² outlier must not have dragged the base value up
+    expect(result.base.value!).toBeLessThan(15_000_000);
   });
 });
 

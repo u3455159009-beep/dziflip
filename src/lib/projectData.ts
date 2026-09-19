@@ -9,7 +9,10 @@ export const PROJECT_INCLUDE = {
     orderBy: { sortOrder: "asc" as const },
     include: { generations: { orderBy: { createdAt: "desc" as const } } }
   },
-  comparables: { orderBy: { foundAt: "desc" as const } },
+  comparables: {
+    orderBy: { foundAt: "desc" as const },
+    include: { priceHistory: { orderBy: { recordedAt: "asc" as const } } }
+  },
   budgetItems: { orderBy: [{ room: "asc" as const }, { sortOrder: "asc" as const }] },
   assumptions: true,
   priceHistory: { orderBy: { recordedAt: "asc" as const } },

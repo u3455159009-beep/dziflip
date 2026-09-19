@@ -4,8 +4,13 @@ import { extractFromText, extractContactInfo, detectPortal, type ExtractedListin
 import { fetchListing } from "@/lib/fetchListing";
 import { DEFAULT_ASSUMPTIONS } from "@/lib/calc";
 import { serializeFieldMeta, serializeFieldSource } from "@/lib/listing/fieldMeta";
-import { LISTING_FIELDS, type ListingField } from "@/lib/types";
+import { LISTING_FIELDS, type ListingField, type CompQualityTier } from "@/lib/types";
 import { findPossibleDuplicates } from "@/lib/dedup";
+import { discoverComparablesForProject } from "@/lib/comparableDiscovery";
+import { discoverOriginalListing } from "@/lib/listingDiscovery";
+import { rescoreAllComparables } from "@/lib/comparableScoring";
+import { computeARV, computeMarketValue, type MarketValueComparable } from "@/lib/marketValue";
+import { getSettings } from "@/lib/settings";
 
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
@@ -84,7 +89,7 @@ export async function POST(req: NextRequest) {
       longitude: extracted.fields.longitude ?? null,
       fieldMeta: serializeFieldMeta(fieldMeta),
       fieldSource: serializeFieldSource(fieldSource),
-      analysisStage: "FULL_ANALYSIS",
+      analysisStage: "BASIC_ANALYSIS", // advanced to COMPARABLES/FULL_ANALYSIS below, once real data actually supports it
       firstSeenAt: new Date(),
       lastSeenAt: new Date(),
       lastVerifiedAt: new Date(),
@@ -112,6 +117,21 @@ export async function POST(req: NextRequest) {
       elevator: extracted.fields.elevator,
       orientation: extracted.fields.orientation,
       legalNotes: extracted.fields.legalNotes,
+      propertyType: extracted.fields.propertyType,
+      airConditioning: extracted.fields.airConditioning,
+      electricalRewiring: extracted.fields.electricalRewiring,
+      masonryCore: extracted.fields.masonryCore,
+      windowsReplacedYear: extracted.fields.windowsReplacedYear,
+      insulationYear: extracted.fields.insulationYear,
+      roofYear: extracted.fields.roofYear,
+      risersYear: extracted.fields.risersYear,
+      landAreaM2: extracted.fields.landAreaM2,
+      zoning: extracted.fields.zoning,
+      buildable: extracted.fields.buildable,
+      utilitiesAvailable: extracted.fields.utilitiesAvailable,
+      accessRoad: extracted.fields.accessRoad,
+      garageDimensions: extracted.fields.garageDimensions,
+      garageElectricity: extracted.fields.garageElectricity,
       photos: {
         create: fetchedPhotos.map((u, i) => ({ url: u, sortOrder: i }))
       },
@@ -142,6 +162,86 @@ export async function POST(req: NextRequest) {
   });
 
   const duplicateCount = await findPossibleDuplicates(project.id).catch(() => 0);
+
+  // --- Listing Discovery Engine (item 1) — only meaningful when the user
+  // pasted text without a URL; a URL fetch already has the real listing.
+  // Best-effort and never blocks the response — with no ACTIVE search
+  // provider configured this always (honestly) resolves to NOT_FOUND.
+  if (!url) {
+    await discoverOriginalListing({
+      propertyType: extracted.fields.propertyType ?? null,
+      disposition: extracted.fields.disposition ?? null,
+      municipality: extracted.fields.municipality ?? null,
+      district: extracted.fields.district ?? null,
+      street: extracted.fields.street ?? null,
+      areaM2: extracted.fields.areaM2 ?? null,
+      askingPrice: extracted.fields.askingPrice ?? null
+    })
+      .then((match) =>
+        prisma.project.update({
+          where: { id: project.id },
+          data: {
+            discoveredListingUrl: match.url,
+            discoveredListingConfidence: match.confidence,
+            discoveredListingReasons: JSON.stringify(match.reasons)
+          }
+        })
+      )
+      .catch(() => {});
+  }
+
+  // --- Comparable Discovery Engine (item 4) → Market Value / ARV (items
+  // 6-9) → sale-price basis for MAX BUY PRICE (item 11). Best-effort: a
+  // provider outage here must never fail the whole analysis — the project
+  // is already saved and the user can retry from the project page.
+  try {
+    await discoverComparablesForProject(project.id, { force: true });
+
+    const [settings, comps] = await Promise.all([
+      getSettings(),
+      prisma.comparable.findMany({ where: { projectId: project.id } })
+    ]);
+
+    let analysisStage: string = "BASIC_ANALYSIS";
+    if (comps.length > 0) {
+      await rescoreAllComparables(project.id);
+      analysisStage = "COMPARABLES";
+
+      const rescored = await prisma.comparable.findMany({ where: { projectId: project.id } });
+      const marketComps: MarketValueComparable[] = rescored.map((c) => ({
+        pricePerM2: c.pricePerM2,
+        qualityTier: (c.qualityTier as CompQualityTier | null) ?? null,
+        priceType: c.priceType,
+        condition: c.condition
+      }));
+      const valueOpts = { minCompCount: settings.minCompCount, minCompQuality: settings.minCompQuality as CompQualityTier };
+      const areaM2 = extracted.fields.areaM2 ?? null;
+
+      // Prefer After-Renovation Value as the flip's sale-price basis, same
+      // as Deal Radar V2 — falls back to current-condition market value
+      // only when there isn't yet a renovated-comp sample for ARV.
+      const arv = computeARV(marketComps, areaM2, valueOpts);
+      const basis = arv.insufficientData ? computeMarketValue(marketComps, areaM2, valueOpts) : arv;
+
+      if (!basis.insufficientData) {
+        await prisma.assumptions.update({
+          where: { projectId: project.id },
+          data: {
+            saleConservative: basis.conservative.value,
+            saleBase: basis.base.value,
+            saleOptimistic: basis.high.value
+          }
+        });
+        analysisStage = "FULL_ANALYSIS";
+      }
+    }
+
+    await prisma.project.update({ where: { id: project.id }, data: { analysisStage } });
+  } catch {
+    // Comparable discovery/valuation failing must never fail the analyze
+    // request itself — the project row (with its extracted fields) is
+    // already safely saved.
+  }
 
   return NextResponse.json({ id: project.id, warning: fetchWarning, duplicateCount });
 }

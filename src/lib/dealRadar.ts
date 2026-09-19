@@ -390,6 +390,7 @@ async function maybeAlertAndOutreach(args: {
   const economics = computeEconomics(project.askingPrice, assumptions, project.areaM2 ?? null);
   const profit = economics.scenarios.conservative.grossProfit;
   const roi = economics.scenarios.conservative.roiPct;
+  if (profit === null || roi === null) return; // no real conservative sale price to base an alert on
 
   if (watcher.minProfit != null && profit < watcher.minProfit) return;
   if (watcher.minRoiPct != null && roi < watcher.minRoiPct) return;

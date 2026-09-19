@@ -158,12 +158,16 @@ describe("Real Product Shopping Engine", () => {
     expect(afterAssumptions.renovationCost).toBe(budgetItem!.total);
 
     const afterMaxBuy = computeMaxBuyPrice(afterAssumptions as unknown as AssumptionsInput);
-    expect(afterMaxBuy).toBeLessThan(beforeMaxBuy); // higher real renovation cost -> lower max buy price
+    expect(afterMaxBuy).not.toBeNull();
+    expect(beforeMaxBuy).not.toBeNull();
+    expect(afterMaxBuy!).toBeLessThan(beforeMaxBuy!); // higher real renovation cost -> lower max buy price
 
     const beforeEconomics = computeEconomics(project.askingPrice!, beforeAssumptions as unknown as AssumptionsInput, 70);
     const afterEconomics = computeEconomics(project.askingPrice!, afterAssumptions as unknown as AssumptionsInput, 70);
-    expect(afterEconomics.scenarios.conservative.grossProfit).toBeLessThan(beforeEconomics.scenarios.conservative.grossProfit);
-    expect(afterEconomics.scenarios.conservative.roiPct).toBeLessThan(beforeEconomics.scenarios.conservative.roiPct);
+    expect(afterEconomics.scenarios.conservative.grossProfit).not.toBeNull();
+    expect(beforeEconomics.scenarios.conservative.grossProfit).not.toBeNull();
+    expect(afterEconomics.scenarios.conservative.grossProfit!).toBeLessThan(beforeEconomics.scenarios.conservative.grossProfit!);
+    expect(afterEconomics.scenarios.conservative.roiPct!).toBeLessThan(beforeEconomics.scenarios.conservative.roiPct!);
   });
 
   it("deselecting a product removes the linked budget line and reverts the recomputed renovation cost", async () => {

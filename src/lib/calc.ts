@@ -53,25 +53,37 @@ export function fixedCostsExclPurchase(a: AssumptionsInput): number {
   );
 }
 
+// A sale price of null, undefined, or <= 0 means "unknown" — never treated
+// as an actual price of zero. Every scenario/band/MAX BUY PRICE value that
+// depends on it must come back null ("nelze vypočítat"), never a number
+// computed against a phantom 0 Kč sale price (item 13).
+function knownPrice(v: number | null | undefined): number | null {
+  return typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null;
+}
+
 export interface ScenarioResult {
-  salePrice: number;
+  salePrice: number | null;
   totalInvestment: number;
-  grossProfit: number;
-  netProfit: number;
-  marginPct: number; // grossProfit / salePrice
-  roiPct: number; // grossProfit / totalInvestment
+  grossProfit: number | null;
+  netProfit: number | null;
+  marginPct: number | null; // grossProfit / salePrice
+  roiPct: number | null; // grossProfit / totalInvestment
 }
 
 export function computeScenario(
   purchasePrice: number,
-  salePrice: number,
+  salePriceInput: number | null | undefined,
   a: AssumptionsInput
 ): ScenarioResult {
   const totalInvestment = purchasePrice + fixedCostsExclPurchase(a);
+  const salePrice = knownPrice(salePriceInput);
+  if (salePrice === null) {
+    return { salePrice: null, totalInvestment, grossProfit: null, netProfit: null, marginPct: null, roiPct: null };
+  }
   const grossProfit = salePrice - totalInvestment;
   const netProfit = grossProfit > 0 ? grossProfit * (1 - n(a.incomeTaxPct)) : grossProfit;
-  const marginPct = salePrice > 0 ? grossProfit / salePrice : 0;
-  const roiPct = totalInvestment > 0 ? grossProfit / totalInvestment : 0;
+  const marginPct = grossProfit / salePrice;
+  const roiPct = totalInvestment > 0 ? grossProfit / totalInvestment : null;
   return { salePrice, totalInvestment, grossProfit, netProfit, marginPct, roiPct };
 }
 
@@ -113,9 +125,9 @@ export function computeEconomics(
     },
     totalInvestment,
     scenarios: {
-      conservative: computeScenario(purchasePrice, n(a.saleConservative), a),
-      base: computeScenario(purchasePrice, n(a.saleBase), a),
-      optimistic: computeScenario(purchasePrice, n(a.saleOptimistic), a)
+      conservative: computeScenario(purchasePrice, a.saleConservative, a),
+      base: computeScenario(purchasePrice, a.saleBase, a),
+      optimistic: computeScenario(purchasePrice, a.saleOptimistic, a)
     }
   };
 }
@@ -125,9 +137,13 @@ export function computeEconomics(
  * three minimum targets (absolute profit, margin, ROI) are simultaneously
  * satisfied. This is the mathematical "good deal" threshold — the boundary
  * between DOBRÁ and NORMÁLNÍ bands, and the basis for MAX BUY PRICE.
+ * Returns null — never a nonsense number — when the conservative sale price
+ * isn't actually known yet (item 11/13).
  */
-export function computeMaxBuyPrice(a: AssumptionsInput): number {
-  const sale = n(a.saleConservative);
+export function computeMaxBuyPrice(a: AssumptionsInput): number | null {
+  const sale = knownPrice(a.saleConservative);
+  if (sale === null) return null;
+
   const fixed = fixedCostsExclPurchase(a);
   const minProfit = n(a.minProfit);
   const minMargin = n(a.minMarginPct);
@@ -148,30 +164,33 @@ export function computeMaxBuyPrice(a: AssumptionsInput): number {
   return Math.min(pProfit, pMargin, pRoi);
 }
 
-export type FlipBand = "BAD" | "NORMAL" | "GOOD" | "BUY_NOW";
+export type FlipBand = "BAD" | "NORMAL" | "GOOD" | "BUY_NOW" | "UNKNOWN";
 
 export const FLIP_BAND_LABELS: Record<FlipBand, string> = {
   BAD: "ŠPATNÁ CENA",
   NORMAL: "NORMÁLNÍ CENA",
   GOOD: "DOBRÁ CENA",
-  BUY_NOW: "KUPUJ HNED"
+  BUY_NOW: "KUPUJ HNED",
+  UNKNOWN: "NELZE URČIT"
 };
 
 export const FLIP_BAND_ICONS: Record<FlipBand, string> = {
   BAD: "🔴",
   NORMAL: "🟠",
   GOOD: "🟢",
-  BUY_NOW: "⚡"
+  BUY_NOW: "⚡",
+  UNKNOWN: "⚪"
 };
 
 export interface FlipBands {
-  goodThreshold: number; // upper bound of GOOD / lower bound of NORMAL
-  buyNowThreshold: number; // upper bound of BUY_NOW / lower bound of GOOD
-  normalThreshold: number; // upper bound of NORMAL / lower bound of BAD
+  goodThreshold: number | null; // upper bound of GOOD / lower bound of NORMAL
+  buyNowThreshold: number | null; // upper bound of BUY_NOW / lower bound of GOOD
+  normalThreshold: number | null; // upper bound of NORMAL / lower bound of BAD
 }
 
 export function computeBands(a: AssumptionsInput): FlipBands {
   const goodThreshold = computeMaxBuyPrice(a);
+  if (goodThreshold === null) return { goodThreshold: null, buyNowThreshold: null, normalThreshold: null };
   const width = n(a.bandWidthPct) || 0.08;
   return {
     goodThreshold,
@@ -181,6 +200,9 @@ export function computeBands(a: AssumptionsInput): FlipBands {
 }
 
 export function classifyPrice(price: number, bands: FlipBands): FlipBand {
+  if (bands.goodThreshold === null || bands.buyNowThreshold === null || bands.normalThreshold === null) {
+    return "UNKNOWN";
+  }
   if (price <= bands.buyNowThreshold) return "BUY_NOW";
   if (price <= bands.goodThreshold) return "GOOD";
   if (price <= bands.normalThreshold) return "NORMAL";
@@ -205,7 +227,8 @@ export function computeSensitivityMatrix(
   purchasePrice: number,
   a: AssumptionsInput
 ): SensitivityCell[][] {
-  const baseSale = n(a.saleBase);
+  const baseSale = knownPrice(a.saleBase);
+  if (baseSale === null) return []; // no known base sale price — nothing meaningful to show (item 13)
   const baseRenovation = n(a.renovationCost);
   const otherFixed =
     n(a.furnishingCost) + n(a.legalCosts) + n(a.financingCost) + n(a.otherCosts) + n(a.reserve);

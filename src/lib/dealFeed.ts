@@ -8,7 +8,8 @@ import {
   computeComparableStats,
   computeEconomics,
   type AssumptionsInput,
-  type FlipBand
+  type FlipBand,
+  type FlipBands
 } from "./calc";
 import { computeDataConfidence, type ConfidenceBreakdownItem } from "./confidence";
 import { computeARV, type MarketValueComparable, type MarketValueEstimate } from "./marketValue";
@@ -49,7 +50,7 @@ export interface DealFeedItem {
     grossProfit: number | null;
     roiPct: number | null;
     marginPct: number | null;
-    bands: { buyNowThreshold: number; goodThreshold: number; normalThreshold: number } | null;
+    bands: FlipBands | null;
     comparablesCount: number;
     comparablesAvgPricePerM2: number | null;
     confidenceBreakdown: ConfidenceBreakdownItem[];

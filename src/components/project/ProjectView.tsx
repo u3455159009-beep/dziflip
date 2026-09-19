@@ -22,8 +22,12 @@ import { SourceEvidencePanel } from "./SourceEvidencePanel";
 import { SmsConversation } from "./SmsConversation";
 import { DuplicatesPanel } from "./DuplicatesPanel";
 import { MarketValuePanel } from "./MarketValuePanel";
+import { InvestmentDashboard } from "./InvestmentDashboard";
+import { AnalysisGapsBanner } from "./AnalysisGapsBanner";
 import { computeDataOrigin, DATA_ORIGIN_LABELS } from "@/lib/dataOrigin";
 import { isDataStale } from "@/lib/staleData";
+import { computeDataConfidence } from "@/lib/confidence";
+import { computeRenovationDataStatus } from "@/lib/renovationBudget";
 import type { FieldMeta } from "@/lib/types";
 import type { MarketValueEstimate } from "@/lib/marketValue";
 
@@ -37,15 +41,32 @@ export function ProjectView({
   project,
   marketValue,
   arv,
-  staleDataThresholdDays
+  staleDataThresholdDays,
+  minCompCount
 }: {
   project: ProjectDTO;
   marketValue?: MarketValueEstimate;
   arv?: MarketValueEstimate;
   staleDataThresholdDays?: number;
+  minCompCount?: number;
 }) {
   const dataOrigin = computeDataOrigin(project);
   const stale = isDataStale(project.lastVerifiedAt, staleDataThresholdDays ?? 14);
+
+  const fieldMeta = (project.fieldMeta ? JSON.parse(project.fieldMeta) : {}) as FieldMeta;
+  const dataConfidence = computeDataConfidence({
+    fieldMeta,
+    comparablesCount: project.comparables.length,
+    hasRealBudgetItems: project.budgetItems.length > 0,
+    renovationCostSet: Boolean(project.assumptions?.renovationCost && project.assumptions.renovationCost > 0),
+    salePriceSet: Boolean(project.assumptions?.saleBase),
+    isStale: stale
+  });
+  const renovationStatus = computeRenovationDataStatus({
+    knownBudgetItemCount: project.budgetItems.filter((b) => b.total != null).length,
+    renovationCostAssumption: project.assumptions?.renovationCost ?? null
+  });
+
   const searchParams = useSearchParams();
   const showWarning = searchParams.get("warning") === "1";
   const [status, setStatus] = useState(project.status);
@@ -122,6 +143,24 @@ export function ProjectView({
         </div>
       )}
 
+      {marketValue && arv && (
+        <AnalysisGapsBanner
+          askingPrice={project.askingPrice}
+          areaM2={project.areaM2}
+          condition={project.condition}
+          comparableCount={project.comparables.length}
+          minCompCount={minCompCount ?? 3}
+          marketValueInsufficient={marketValue.insufficientData}
+          arvInsufficient={arv.insufficientData}
+          saleConservativeSet={Boolean(project.assumptions?.saleConservative)}
+          renovationStatus={renovationStatus}
+        />
+      )}
+
+      {marketValue && arv && (
+        <InvestmentDashboard project={project} marketValue={marketValue} arv={arv} dataConfidenceLevel={dataConfidence.level} />
+      )}
+
       <Card className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <div className="text-xs uppercase tracking-wide text-muted">Nabídková cena</div>
@@ -160,7 +199,12 @@ export function ProjectView({
 
       <SourceEvidencePanel project={project} />
 
-      <ComparablesTable projectId={project.id} comparables={project.comparables} />
+      <ComparablesTable
+        projectId={project.id}
+        comparables={project.comparables}
+        discoveryNote={project.comparableDiscoveryNote}
+        lastDiscoveryAt={project.lastComparableDiscoveryAt}
+      />
 
       {marketValue && arv && <MarketValuePanel marketValue={marketValue} arv={arv} />}
 

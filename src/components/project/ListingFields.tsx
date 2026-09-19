@@ -5,12 +5,28 @@ import {
   BOOLEAN_FIELDS,
   LISTING_FIELDS,
   LISTING_FIELD_LABELS,
+  PROPERTY_TYPE_FIELDS,
+  PROPERTY_TYPE_LABELS,
   type Confidence,
   type FieldMeta,
-  type ListingField
+  type ListingField,
+  type PropertyType
 } from "@/lib/types";
 import { ConfidenceBadge, Card, SectionTitle } from "@/components/ui";
 import type { ProjectDTO } from "@/lib/project-types";
+
+// Always shown regardless of property type — identifying/pricing fields
+// every listing has, plus propertyType itself so it can be corrected.
+const CORE_FIELDS: ListingField[] = [
+  "propertyType",
+  "title",
+  "askingPrice",
+  "municipality",
+  "district",
+  "street",
+  "legalNotes",
+  "description"
+];
 
 type FieldValue = string | number | boolean | null;
 
@@ -53,14 +69,21 @@ export function ListingFields({ project }: { project: ProjectDTO }) {
     return "";
   }
 
+  const currentType = (values.propertyType as PropertyType | null) || null;
+  const visibleFields: ListingField[] =
+    currentType && PROPERTY_TYPE_FIELDS[currentType]
+      ? Array.from(new Set([...CORE_FIELDS, ...PROPERTY_TYPE_FIELDS[currentType]]))
+      : [...LISTING_FIELDS];
+
   return (
     <Card>
-      <SectionTitle subtitle="Ručně opravte cokoliv, co aplikace nezískala správně nebo vůbec. Ruční úprava se okamžitě označí jako OVĚŘENO.">
+      <SectionTitle subtitle="Ručně opravte cokoliv, co aplikace nezískala správně nebo vůbec. Ruční úprava se okamžitě označí jako OVĚŘENO. Zobrazená pole se přizpůsobují typu nemovitosti.">
         Údaje o nemovitosti
       </SectionTitle>
       <div className="grid grid-cols-1 gap-x-6 gap-y-5 sm:grid-cols-2 lg:grid-cols-3">
-        {LISTING_FIELDS.map((field) => {
+        {visibleFields.map((field) => {
           const isBool = BOOLEAN_FIELDS.includes(field);
+          const isPropertyType = field === "propertyType";
           const currentMeta: Confidence = meta[field] ?? "UNKNOWN";
           return (
             <div key={field}>
@@ -70,7 +93,21 @@ export function ListingFields({ project }: { project: ProjectDTO }) {
                 </span>
                 <ConfidenceBadge level={currentMeta} />
               </div>
-              {isBool ? (
+              {isPropertyType ? (
+                <select
+                  value={(values.propertyType as string) ?? ""}
+                  onChange={(e) => save(field, e.target.value === "" ? null : e.target.value)}
+                  disabled={saving === field}
+                  className="w-full rounded-lg border border-line bg-card px-3.5 py-2.5 text-sm text-ink focus:border-beige-400 focus:outline-none focus:ring-2 focus:ring-beige-200"
+                >
+                  <option value="">Neznámé</option>
+                  {Object.entries(PROPERTY_TYPE_LABELS).map(([key, label]) => (
+                    <option key={key} value={key}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              ) : isBool ? (
                 <select
                   value={boolLabel(values[field])}
                   onChange={(e) => {
@@ -95,7 +132,11 @@ export function ListingFields({ project }: { project: ProjectDTO }) {
                       return rest;
                     });
                     const raw = e.target.value.trim();
-                    if (field === "askingPrice" || field === "areaM2" || field === "pricePerM2") {
+                    const numericFields: ListingField[] = [
+                      "askingPrice", "areaM2", "pricePerM2", "landAreaM2",
+                      "windowsReplacedYear", "insulationYear", "roofYear", "risersYear"
+                    ];
+                    if (numericFields.includes(field)) {
                       const num = raw === "" ? null : Number(raw.replace(",", "."));
                       save(field, Number.isFinite(num as number) || num === null ? num : values[field]);
                     } else {

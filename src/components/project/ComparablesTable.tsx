@@ -2,7 +2,7 @@
 
 import { Fragment, useMemo, useState } from "react";
 import { Button, Card, Input, SectionTitle, Select } from "@/components/ui";
-import { formatCZK, formatDate, formatNumber } from "@/lib/format";
+import { formatCZK, formatDateTime, formatNumber } from "@/lib/format";
 import { computeComparableStats } from "@/lib/calc";
 import { PRICE_TYPE_LABELS, PRICE_TYPES, COMP_QUALITY_TIER_LABELS, type CompQualityTier } from "@/lib/types";
 import type { ComparableDTO } from "@/lib/project-types";
@@ -71,16 +71,48 @@ function BoolSelect({
 
 export function ComparablesTable({
   projectId,
-  comparables: initial
+  comparables: initial,
+  discoveryNote,
+  lastDiscoveryAt
 }: {
   projectId: string;
   comparables: ComparableDTO[];
+  discoveryNote?: string | null;
+  lastDiscoveryAt?: string | null;
 }) {
   const [comparables, setComparables] = useState(initial);
   const [form, setForm] = useState(emptyForm);
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [note, setNote] = useState(discoveryNote ?? null);
+  const [lastAt, setLastAt] = useState(lastDiscoveryAt ?? null);
+
+  async function refreshComparables() {
+    setRefreshing(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/comparables/discover`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ force: true })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setNote(data.note ?? null);
+        setLastAt(new Date().toISOString());
+        const refreshed = await fetch(`/api/projects/${projectId}`);
+        if (refreshed.ok) {
+          const project = await refreshed.json();
+          setComparables(project.comparables ?? []);
+        }
+      } else {
+        setNote(data.error ?? "Vyhledání srovnatelných nabídek selhalo.");
+      }
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   const stats = useMemo(
     () => computeComparableStats(comparables.map((c) => c.pricePerM2 ?? NaN)),
@@ -124,14 +156,26 @@ export function ComparablesTable({
 
   return (
     <Card>
-      <div className="flex items-start justify-between">
-        <SectionTitle subtitle="Srovnatelné nemovitosti v lokalitě. Nabídkové ceny nejsou automaticky realizované prodejní ceny — typ ceny je vždy vyznačen.">
+      <div className="flex items-start justify-between gap-3">
+        <SectionTitle subtitle="Srovnatelné nemovitosti v lokalitě. Nabídkové ceny nejsou automaticky realizované prodejní ceny — typ ceny je vždy vyznačen. Comparable Discovery Engine hledá srovnání automaticky přes aktivní zdroje (viz Nastavení → Provider Health) — ručně je doplňte, jen pokud automatické vyhledání nestačí.">
           Cenový engine — srovnatelné nemovitosti
         </SectionTitle>
-        <Button variant="secondary" onClick={() => setOpen((o) => !o)}>
-          {open ? "Zavřít" : "+ Přidat srovnání"}
-        </Button>
+        <div className="flex shrink-0 gap-2">
+          <Button variant="secondary" onClick={refreshComparables} disabled={refreshing}>
+            {refreshing ? "Vyhledávám…" : "↻ Aktualizovat srovnání"}
+          </Button>
+          <Button variant="secondary" onClick={() => setOpen((o) => !o)}>
+            {open ? "Zavřít" : "+ Přidat ručně"}
+          </Button>
+        </div>
       </div>
+
+      {note && (
+        <p className="mb-4 text-xs text-muted">
+          {note}
+          {lastAt && ` (naposledy ${formatDateTime(lastAt)})`}
+        </p>
+      )}
 
       {open && (
         <div className="mb-6 grid grid-cols-2 gap-3 rounded-lg border border-line bg-beige-50 p-4 sm:grid-cols-3">
@@ -210,7 +254,19 @@ export function ComparablesTable({
                     <td className="py-2.5 pr-3 text-right">{formatCZK(c.pricePerM2)}</td>
                     <td className="py-2.5 pr-3">{c.condition || "—"}</td>
                     <td className="py-2.5 pr-3 text-right">{c.distanceKm ? `${formatNumber(c.distanceKm, 1)} km` : "—"}</td>
-                    <td className="py-2.5 pr-3 text-xs">{PRICE_TYPE_LABELS[c.priceType as keyof typeof PRICE_TYPE_LABELS] ?? c.priceType}</td>
+                    <td className="py-2.5 pr-3 text-xs">
+                      {PRICE_TYPE_LABELS[c.priceType as keyof typeof PRICE_TYPE_LABELS] ?? c.priceType}
+                      {c.isOutlier && (
+                        <span className="ml-1.5 rounded-full bg-band-bad/10 px-1.5 py-0.5 text-[10px] font-medium text-band-bad" title={c.outlierReason ?? undefined}>
+                          OUTLIER
+                        </span>
+                      )}
+                      {c.priceHistory.length > 1 && (
+                        <span className="ml-1.5 rounded-full bg-band-warn/10 px-1.5 py-0.5 text-[10px] font-medium text-band-warn">
+                          změna ceny ×{c.priceHistory.length - 1}
+                        </span>
+                      )}
+                    </td>
                     <td className="py-2.5 pr-3">
                       {tier ? (
                         <button
@@ -231,6 +287,7 @@ export function ComparablesTable({
                       ) : (
                         c.portal || "—"
                       )}
+                      <div className="text-[10px] text-muted">{c.sourceProvider ? "automaticky nalezeno" : "ručně přidáno"}</div>
                     </td>
                     <td className="py-2.5 text-right">
                       <button onClick={() => remove(c.id)} className="text-xs text-muted hover:text-band-bad">
