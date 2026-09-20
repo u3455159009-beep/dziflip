@@ -110,7 +110,38 @@ export async function searchProductsForRequirement(requirementId: string): Promi
     }
   }
 
+  await prisma.productRequirement.update({ where: { id: requirementId }, data: { searchedAt: new Date() } });
+
   return { candidates, providerNotes };
+}
+
+/**
+ * Zero-Click pipeline (item 8) — automatically picks the best real
+ * candidate for a requirement so the shopping list doesn't need a manual
+ * click. Never invents a choice: only ever picks among candidates a real
+ * provider actually returned. Prefers a verified price over an estimated/
+ * unknown one, then the cheapest available option — a simple, defensible,
+ * fully auditable heuristic (never the most expensive "best looking" one,
+ * which would work against Budget First).
+ */
+export async function autoSelectBestCandidate(requirementId: string) {
+  const requirement = await prisma.productRequirement.findUniqueOrThrow({
+    where: { id: requirementId },
+    include: { products: true }
+  });
+  if (requirement.products.some((p) => p.isSelected)) return null; // already decided — never overrides a human/prior choice
+
+  const CONFIDENCE_RANK: Record<string, number> = { VERIFIED: 0, ESTIMATED: 1, UNKNOWN: 2 };
+  const eligible = requirement.products.filter((p) => p.status === "CANDIDATE" && p.availability !== "NENI_SKLADEM" && p.price != null);
+  if (eligible.length === 0) return null;
+
+  eligible.sort((a, b) => {
+    const confDiff = (CONFIDENCE_RANK[a.confidence] ?? 2) - (CONFIDENCE_RANK[b.confidence] ?? 2);
+    if (confDiff !== 0) return confDiff;
+    return (a.unitPrice ?? a.price ?? 0) - (b.unitPrice ?? b.price ?? 0);
+  });
+
+  return selectProduct(eligible[0].id);
 }
 
 export async function addManualProduct(

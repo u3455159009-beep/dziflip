@@ -79,6 +79,12 @@ export const LISTING_FIELDS = [
   "insulationYear",
   "roofYear",
   "risersYear",
+  "usableAreaM2",
+  "constructionYear",
+  "heatingType",
+  "monthlyCosts",
+  "repairFund",
+  "importantFacts",
   "landAreaM2",
   "zoning",
   "buildable",
@@ -127,6 +133,12 @@ export const LISTING_FIELD_LABELS: Record<ListingField, string> = {
   insulationYear: "Rok zateplení",
   roofYear: "Rok (nové) střechy",
   risersYear: "Rok výměny stoupaček",
+  usableAreaM2: "Užitná plocha (m²)",
+  constructionYear: "Rok výstavby",
+  heatingType: "Vytápění",
+  monthlyCosts: "Měsíční náklady (Kč)",
+  repairFund: "Fond oprav (Kč)",
+  importantFacts: "Další důležité informace",
   landAreaM2: "Plocha pozemku (m²)",
   zoning: "Územní plán / využití",
   buildable: "Zastavitelnost",
@@ -173,22 +185,23 @@ export const PROPERTY_TYPE_LABELS: Record<PropertyType, string> = {
 // fields for a house/pozemek, without maintaining a second field list.
 export const PROPERTY_TYPE_FIELDS: Record<PropertyType, ListingField[]> = {
   APARTMENT: [
-    "disposition", "areaM2", "floor", "totalFloors", "buildingType", "construction", "ownership",
+    "disposition", "areaM2", "usableAreaM2", "floor", "totalFloors", "buildingType", "construction", "ownership",
     "condition", "buildingCondition", "penb", "balcony", "terrace", "loggia", "cellar", "parking",
     "elevator", "orientation", "airConditioning", "electricalRewiring", "masonryCore",
-    "windowsReplacedYear", "insulationYear", "roofYear", "risersYear"
+    "windowsReplacedYear", "insulationYear", "roofYear", "risersYear",
+    "constructionYear", "heatingType", "monthlyCosts", "repairFund", "importantFacts"
   ],
   HOUSE: [
-    "disposition", "areaM2", "landAreaM2", "construction", "ownership", "condition", "buildingCondition",
+    "disposition", "areaM2", "usableAreaM2", "landAreaM2", "construction", "ownership", "condition", "buildingCondition",
     "penb", "parking", "orientation", "airConditioning", "electricalRewiring", "windowsReplacedYear",
-    "insulationYear", "roofYear"
+    "insulationYear", "roofYear", "constructionYear", "heatingType", "monthlyCosts", "importantFacts"
   ],
-  LAND: ["landAreaM2", "zoning", "buildable", "utilitiesAvailable", "accessRoad", "structuresOnLand", "landRestrictions"],
+  LAND: ["landAreaM2", "zoning", "buildable", "utilitiesAvailable", "accessRoad", "structuresOnLand", "landRestrictions", "importantFacts"],
   GARAGE: ["areaM2", "garageDimensions", "garageElectricity", "garageLandOwnership", "garageRentNote", "condition"],
-  COMMERCIAL: ["areaM2", "construction", "ownership", "condition", "parking", "orientation"],
+  COMMERCIAL: ["areaM2", "construction", "ownership", "condition", "parking", "orientation", "monthlyCosts"],
   OTHER: [
     "disposition", "areaM2", "landAreaM2", "construction", "ownership", "condition", "buildingCondition",
-    "penb", "balcony", "terrace", "loggia", "cellar", "parking", "elevator", "orientation"
+    "penb", "balcony", "terrace", "loggia", "cellar", "parking", "elevator", "orientation", "importantFacts"
   ]
 };
 

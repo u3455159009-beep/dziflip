@@ -264,8 +264,10 @@ Blob storu appka upload čestně odmítne srozumitelnou chybou, nikdy nepředst�
    token vygeneruje a doplní Vercel.
 3. Po redeploy:
    - `/project/[id]` → sekce **Fotografie** → tlačítko „+ Přidat" otevře
-     systémový výběr souboru, nahraný soubor se uloží do Blob storage a
-     hned se zobrazí v galerii — přežije refresh stránky.
+     systémový výběr souboru. Soubor jde přímo z prohlížeče do Blob storage
+     (`upload()` z `@vercel/blob/client`, token vydává
+     `.../photos/client-upload`) — appka ho hned zobrazí v galerii a přežije
+     refresh stránky.
    - Nahraná fotografie má `sourcePhotoProvider = "MANUAL_UPLOAD"` a je
      okamžitě použitelná jako ORIGINAL vstup pro Gemini image-to-image
      pipeline (bod 8) — appka jen znovu stáhne `Photo.url`, stejně jako u
@@ -276,13 +278,17 @@ srozumitelnou chybu („Úložiště fotografií není připojeno"), URL-based
 přidání fotografie (`nebo vložit URL fotografie`) funguje beze změny jako
 dosud.
 
-**Limity.** Appka sama odmítá soubory nad 8 MB a mimo JPG/JPEG/PNG/WEBP.
-Nezávisle na tom má i Vercel vlastní platformní limit velikosti request body
-u Route Handlerů (typicky ~4,5 MB na běžných plánech) — větší soubor může
-být odmítnut ještě dřív, než ho appka stihne zpracovat; pokud to bude v praxi
-limitující, řešením je buď zvýšit limit ve Vercel projektu, nebo přejít na
-přímý client-side upload přes `@vercel/blob/client` (`upload()` s
-server-side vydávaným tokenem) — to není v tomto kroku implementováno.
+**Limity (skutečné, ne jen deklarované).** UI nahrává soubory přímo z
+prohlížeče do Blob storage (client upload) — tahle cesta NEPROCHÁZÍ přes
+žádnou DziFlip serverless funkci, takže ji neomezuje Vercelův limit
+velikosti request body (~4,5 MB u běžných Route Handlerů). Appka sama
+odmítá soubory nad **25 MB** (`MAX_CLIENT_UPLOAD_FILE_SIZE_BYTES` v
+`src/lib/photoUpload.ts`) a mimo JPG/JPEG/PNG/WEBP — a to je skutečný,
+vynutitelný limit, ne jen popisek v UI. Starší server-side route
+(`POST .../photos/upload`, appka ji stále má pro programový/testovací
+přístup) ZŮSTÁVÁ omezena na 4 MB, protože ta celé tělo requestu skutečně
+nahrává do vlastní funkce — pokud bys ji chtěl použít z UI, buď bys narazil
+přesně na chybu z zadání ("limit nižší než 8 MB"), proto ji UI nepoužívá.
 
 ## 10. Shrnutí — co přesně nastavit ve Vercelu
 
@@ -290,7 +296,8 @@ server-side vydávaným tokenem) — to není v tomto kroku implementováno.
 |---|---|
 | `DATABASE_URL` | Connection string k tvé Prisma Postgres databázi — Vercel ho vloží sám při připojení databáze k projektu |
 | `FLATSCAN_API_KEY` | *(volitelné, ale doporučené)* Jakmile ho dostaneš od FlatScanu, přidej ho do Vercelu a redeployni — aktivuje automatické comparables, listing discovery, historii cen a lokalitní kontext (viz bod 7.1). Bez něj appka běží dál stejně jako dosud, jen bez těchto automatizací. |
-| `IMAGE_GEN_API_KEY` | *(volitelné)* Google Gemini API klíč — aktivuje skutečnou AI vizualizaci rekonstrukce (viz bod 8). Výhradně server-side proměnná, nikdy `NEXT_PUBLIC_...`. |
+| `IMAGE_GEN_API_KEY` | *(volitelné, ale klíčové pro Zero-Click pipeline — viz bod 11)* Google Gemini API klíč — jeden klíč aktivuje AI vizualizaci rekonstrukce (bod 8), AI Vision analýzu fotografií a automatický návrh rekonstrukce (RenovationPlan). Výhradně server-side proměnná, nikdy `NEXT_PUBLIC_...`. |
+| `PRODUCT_SEARCH_API_KEY` | *(volitelné)* Licencované produktové API/feed — aktivuje automatické vyhledávání reálných produktů pro nákupní seznam (bod 11). Bez něj zůstává PENDING_ACCESS, nikdy se nic nevymýšlí. |
 | `BLOB_READ_WRITE_TOKEN` | **(doporučené — bez něj nefunguje upload souboru)** Vercel ho vloží sám po připojení Blob storu k projektu (viz bod 9). |
 
 Vše ostatní z `.env.example` (SMTP, SMS API, Vision API…) je **volitelné** —
@@ -299,3 +306,32 @@ appka bez nich normálně běží, jen příslušné funkce zůstanou v bezpečn
 
 **`DATABASE_URL` v Project Settings už je vyplněná skutečnou hodnotou z tvé
 Prisma Postgres databáze → ano, můžeš kliknout Deploy.**
+
+## 11. Zero-Click Pipeline — co běží automaticky, a co je potřeba zapnout ručně jednou
+
+Po vytvoření projektu (vložení URL nebo textu inzerátu a jednom kliknutí) se
+zbytek — comparables, analýza fotografií, návrh rekonstrukce, generování
+BEFORE/AFTER, hledání produktů, kontrola rozpočtu a Value Engineering —
+odehrává automaticky na serveru (`src/lib/pipeline.ts`, endpoint
+`POST /api/projects/[id]/pipeline/advance`, který stránka projektu volá
+opakovaně na pozadí, dokud pipeline nenahlásí `DONE`). Žádné tlačítko
+"Analyzovat", "Vygenerovat" ani "Najít produkty" už není potřeba.
+
+Dvě věci je ale potřeba nastavit ručně, **jen jednou, globálně**, ne po
+projektech:
+
+1. **`IMAGE_GEN_API_KEY` ve Vercelu** — bez něj zůstávají kroky Analýza
+   fotografií, Návrh rekonstrukce i Generování BEFORE/AFTER ve stavu
+   `WAITING_FOR_PROVIDER` (appka to poctivě ukáže, nikdy nic nevymyslí
+   místo toho).
+2. **Nastavení → "AI analýza fotografií"** — samostatný souhlas s
+   odesíláním reálných fotografií nemovitosti externí AI službě (výchozí
+   stav: vypnuto). I s nastaveným `IMAGE_GEN_API_KEY` zůstane krok Analýza
+   fotografií ve stavu `WAITING_FOR_PROVIDER`, dokud tenhle přepínač
+   nezapneš — to je záměr, ne chyba, aby appka nikdy neposlala fotografii
+   ven bez výslovného souhlasu.
+
+Bez `PRODUCT_SEARCH_API_KEY` proběhne vše ostatní automaticky a krok
+Hledání produktů zůstane `WAITING_FOR_PROVIDER` — zbytek dashboardu
+(NEMOVITOST, TRH, FLIP, REKONSTRUKCE, FOTOGRAFIE) se přesto automaticky
+doplní.

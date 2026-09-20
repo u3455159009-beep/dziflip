@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import { upload } from "@vercel/blob/client";
 import { Button, Card, Input, SectionTitle } from "@/components/ui";
 import {
   ROOM_TYPES,
@@ -52,7 +53,11 @@ const CONFIDENCE_LABELS: Record<string, string> = {
 // Must match src/lib/photoUpload.ts exactly — this is only a client-side
 // pre-check for instant feedback; the server always re-validates for real.
 const ALLOWED_UPLOAD_MIME_TYPES = ["image/jpeg", "image/png", "image/webp"];
-const MAX_UPLOAD_FILE_SIZE_BYTES = 8 * 1024 * 1024;
+// Real ceiling for the direct browser→Blob client upload this component
+// actually uses (src/lib/photoUpload.ts MAX_CLIENT_UPLOAD_FILE_SIZE_BYTES)
+// — not the older, much lower server-route limit, so this number always
+// matches what the app can genuinely accept.
+const MAX_UPLOAD_FILE_SIZE_BYTES = 25 * 1024 * 1024;
 
 export function PhotosGallery({ projectId, photos: initial }: { projectId: string; photos: PhotoDTO[] }) {
   const [photos, setPhotos] = useState(initial);
@@ -131,18 +136,31 @@ export function PhotosGallery({ projectId, photos: initial }: { projectId: strin
           continue;
         }
 
-        const formData = new FormData();
-        formData.append("file", file);
         try {
-          const res = await fetch(`/api/projects/${projectId}/photos/upload`, { method: "POST", body: formData });
+          // Uploads straight from the browser to Vercel Blob storage — the
+          // file never passes through this app's own server, so it's not
+          // limited by a serverless function's request-body size.
+          const blob = await upload(file.name, file, {
+            access: "public",
+            handleUploadUrl: `/api/projects/${projectId}/photos/client-upload`,
+            contentType: file.type
+          });
+
+          const res = await fetch(`/api/projects/${projectId}/photos/finalize-upload`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url: blob.url, contentType: blob.contentType, sizeBytes: file.size })
+          });
           const body = await res.json().catch(() => null);
           if (res.ok && body) {
             setPhotos((p) => [...p, body]);
           } else {
             setUploadError(body?.error || `Nahrání souboru „${file.name}" selhalo.`);
           }
-        } catch {
-          setUploadError(`Nahrání souboru „${file.name}" selhalo — zkontrolujte připojení a zkuste to znovu.`);
+        } catch (err) {
+          setUploadError(
+            err instanceof Error && err.message ? `Nahrání souboru „${file.name}" selhalo: ${err.message}` : `Nahrání souboru „${file.name}" selhalo — zkontrolujte připojení a zkuste to znovu.`
+          );
         }
       }
     } finally {

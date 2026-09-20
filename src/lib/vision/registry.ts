@@ -1,4 +1,5 @@
 import { createPendingVisionProvider } from "./pendingProvider";
+import { geminiVisionProvider } from "./gemini/provider";
 import type { VisionProvider } from "./types";
 
 // No vision API is connected — see the status note for exactly what
@@ -12,7 +13,7 @@ export const aiVisionProvider: VisionProvider = createPendingVisionProvider(
   "Čeká na připojení schváleného vision modelu (API klíč, např. pro rozpoznávání místností a stavu z fotografií) a na explicitní souhlas s odesíláním fotografií nemovitosti externí službě. Do té doby lze fotografie analyzovat pouze ručně."
 );
 
-export const VISION_PROVIDERS: VisionProvider[] = [aiVisionProvider];
+export const VISION_PROVIDERS: VisionProvider[] = [geminiVisionProvider, aiVisionProvider];
 
 export function getActiveVisionProvider(): VisionProvider | null {
   return VISION_PROVIDERS.find((p) => p.status === "ACTIVE") ?? null;

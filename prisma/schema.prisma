@@ -120,6 +120,21 @@ model Project {
   roofYear               Int? // rok (nové) střechy
   risersYear             Int? // rok výměny stoupaček
 
+  // Additional explicit-only fields (Zero-Click pipeline, item 1) — every
+  // one of these is set only from a literal, unambiguous mention in the
+  // source text; never guessed, never estimated, never carried over from
+  // another project.
+  usableAreaM2    Float? // užitná plocha, when the text states it distinctly from areaM2 (podlahová plocha)
+  constructionYear Int? // rok výstavby
+  heatingType     String? // vytápění, e.g. "plynový kondenzační kotel"
+  monthlyCosts    Float? // měsíční náklady/výdaje na bydlení (Kč), NOT fond oprav
+  repairFund      Float? // fond oprav (Kč/měsíc), when stated separately from monthlyCosts
+  // Free-form explicit facts that don't fit a dedicated column (krb,
+  // plastová okna, "garáž zahrnuta v ceně" price-condition notes, etc.) —
+  // JSON array of short Czech strings, each traceable to a literal phrase
+  // in the source text. Never invented.
+  importantFacts  String?
+
   // HOUSE / LAND — building vs. land plot area are tracked separately from
   // the apartment-oriented areaM2 (which for a house means usable floor area).
   landAreaM2 Float?
@@ -740,6 +755,12 @@ model ProductRequirement {
   // detection, so the shopping list stays tied to what was actually shown.
   sourcePhotoGenerationId String?
   usedInVisualization     Boolean @default(false) // true = "Použito ve vizualizaci"; false but linked = "nejbližší dostupný ekvivalent"
+
+  // Zero-Click pipeline (item 8) — set the moment a real product search was
+  // actually attempted for this requirement (regardless of how many
+  // candidates it found), so the automatic pipeline knows not to keep
+  // re-searching it on every poll. Null means "never searched yet".
+  searchedAt DateTime?
 
   products   Product[]
   budgetItem BudgetItem?

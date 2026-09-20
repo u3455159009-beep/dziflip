@@ -380,6 +380,12 @@ export interface ProjectDTO {
   insulationYear: number | null;
   roofYear: number | null;
   risersYear: number | null;
+  usableAreaM2: number | null;
+  constructionYear: number | null;
+  heatingType: string | null;
+  monthlyCosts: number | null;
+  repairFund: number | null;
+  importantFacts: string | null;
   landAreaM2: number | null;
   zoning: string | null;
   buildable: boolean | null;

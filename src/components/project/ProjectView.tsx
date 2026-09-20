@@ -26,6 +26,7 @@ import { InvestmentDashboard } from "./InvestmentDashboard";
 import { AnalysisGapsBanner } from "./AnalysisGapsBanner";
 import { LocalityContextPanel } from "./LocalityContextPanel";
 import { DiscoveredListingHistoryPanel } from "./DiscoveredListingHistoryPanel";
+import { PipelineStatus } from "./PipelineStatus";
 import { RenovationDashboard } from "./RenovationDashboard";
 import { RenovationPlanPanel } from "./RenovationPlanPanel";
 import { CandidateListingPhotosBanner } from "./CandidateListingPhotosBanner";
@@ -141,6 +142,8 @@ export function ProjectView({
           </Select>
         </div>
       </div>
+
+      <PipelineStatus projectId={project.id} />
 
       {showWarning && (
         <div className="rounded-lg border border-band-normal/40 bg-band-normalBg p-4 text-sm text-band-normal">

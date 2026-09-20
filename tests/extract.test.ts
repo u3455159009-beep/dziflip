@@ -59,7 +59,9 @@ Osobní vlastnictví, cihlová stavba.
 
     // Every extracted value carries a confidence tag — nothing is silently assumed VERIFIED.
     expect(result.meta.askingPrice).toBe("VERIFIED");
-    expect(result.meta.propertyType).toBe("ESTIMATED");
+    // propertyType is read from an explicit keyword ("bytu") actually
+    // present in the text, so it's a verified reading, not a guess.
+    expect(result.meta.propertyType).toBe("VERIFIED");
   });
 
   it("never fabricates fields that aren't actually in the text (scenario G: no price, scenario H: no exact address)", () => {
@@ -102,5 +104,97 @@ Cena: 3 200 000 Kč
     const result = extractFromText(text);
     expect(result.fields.propertyType).toBe("LAND");
     expect(result.fields.floor).toBeUndefined();
+  });
+});
+
+// Regression test (Zero-Click pipeline, item 1) — a real Brno-Žabovřesky
+// listing that a buggy `\bŽabovřesky\b` regex (JS `\b` is ASCII-only, so it
+// never matches a Czech word starting with an accented letter) used to fail
+// to detect, and explicit facts that used to be wrongly tagged ESTIMATED.
+describe("extractFromText — Stránského, Brno-Žabovřesky regression (item 1)", () => {
+  const text = `
+Stránského, Brno–Žabovřesky
+4+kk
+11 490 000 Kč
+cca 100/103 m²
+3. NP ze 4
+cihlový dům
+bez výtahu
+balkon
+vlastní garáž
+dům z roku 2002
+koupelna + malování 2013
+plynový kondenzační kotel
+krb
+plastová okna
+měsíční náklady cca 4 000 Kč
+`;
+  const result = extractFromText(text);
+
+  it("identifies Žabovřesky, never Komín or any other Brno district", () => {
+    expect(result.fields.district).toBe("Žabovřesky");
+    expect(result.fields.district).not.toBe("Komín");
+    expect(result.meta.district).toBe("VERIFIED");
+  });
+
+  it("identifies the municipality Brno", () => {
+    expect(result.fields.municipality).toBe("Brno");
+    expect(result.meta.municipality).toBe("VERIFIED");
+  });
+
+  it("extracts disposition, price and both area figures as VERIFIED, not ESTIMATED/UNKNOWN", () => {
+    expect(result.fields.disposition).toBe("4+kk");
+    expect(result.meta.disposition).toBe("VERIFIED");
+    expect(result.fields.askingPrice).toBe(11490000);
+    expect(result.meta.askingPrice).toBe("VERIFIED");
+    expect(result.fields.areaM2).toBe(100);
+    expect(result.fields.usableAreaM2).toBe(103);
+    expect(result.meta.areaM2).toBe("VERIFIED");
+    expect(result.meta.usableAreaM2).toBe("VERIFIED");
+  });
+
+  it("extracts floor 3 of 4, construction, elevator=false, balcony, garage/parking — all VERIFIED", () => {
+    expect(result.fields.floor).toBe("3");
+    expect(result.fields.totalFloors).toBe("4");
+    expect(result.fields.construction).toBe("Cihla");
+    expect(result.fields.elevator).toBe(false);
+    expect(result.fields.balcony).toBe(true);
+    expect(result.fields.parking).toBe(true);
+    for (const f of ["floor", "totalFloors", "construction", "elevator", "balcony", "parking"] as const) {
+      expect(result.meta[f]).toBe("VERIFIED");
+    }
+  });
+
+  it("extracts construction year, heating, and monthly costs — all VERIFIED", () => {
+    expect(result.fields.constructionYear).toBe(2002);
+    expect(result.meta.constructionYear).toBe("VERIFIED");
+    expect(result.fields.heatingType).toBe("Plynový kondenzační kotel");
+    expect(result.meta.heatingType).toBe("VERIFIED");
+    expect(result.fields.monthlyCosts).toBe(4000);
+    expect(result.meta.monthlyCosts).toBe("VERIFIED");
+  });
+
+  it("captures krb, plastová okna, vlastní garáž and the 2013 bathroom/paint renovation as important facts", () => {
+    expect(result.fields.importantFacts).toBeDefined();
+    const facts: string[] = JSON.parse(result.fields.importantFacts!);
+    expect(facts).toContain("Krb");
+    expect(facts).toContain("Plastová okna");
+    expect(facts).toContain("Vlastní garáž");
+    expect(facts.some((f) => f.includes("2013"))).toBe(true);
+  });
+
+  it("never invents legal defects or any fact not literally present in the text", () => {
+    expect(result.fields.legalNotes).toBeUndefined();
+    expect(result.meta.legalNotes).toBeUndefined();
+  });
+
+  it("a second, unrelated project's extraction never carries over this project's district", () => {
+    // Simulates two independent projects processed back-to-back — proves
+    // extractFromText is a pure function with no shared/leaked state.
+    const other = extractFromText("Prodej bytu 3+1, Brno - Komín, 80 m², 5 000 000 Kč");
+    expect(other.fields.district).toBe("Komín");
+    // Re-running the Žabovřesky extraction again afterwards must still be Žabovřesky.
+    const again = extractFromText(text);
+    expect(again.fields.district).toBe("Žabovřesky");
   });
 });

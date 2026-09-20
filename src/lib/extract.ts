@@ -38,6 +38,12 @@ export interface ExtractedListing {
     insulationYear: number;
     roofYear: number;
     risersYear: number;
+    usableAreaM2: number;
+    constructionYear: number;
+    heatingType: string;
+    monthlyCosts: number;
+    repairFund: number;
+    importantFacts: string;
     landAreaM2: number;
     zoning: string;
     buildable: boolean;
@@ -128,7 +134,20 @@ function normalizeNumber(raw: string): number {
 // declined Czech word hits an accented letter (e.g. "rodinn\w*" fails on
 // "rodinného"). CZ_W is a word-character class that actually covers Czech,
 // used everywhere a stem needs to absorb a declined suffix.
-const CZ_W = "a-zA-Z0-9_ěščřžýáíéůúťďňĚŠČŘŽÝÁÍÉŮÚŤĎŇ";
+const CZ_W = "a-zA-Z0-9_ěščřžýáíéůúťďňĚŠČŘŽÝÁÍÉŮÚŤĎŇóÓ";
+
+// JS's `\b` boundary is *defined* in terms of `\w`, so for the same reason
+// as above it silently fails at the edge of a Czech word that starts or
+// ends with an accented letter — "Žabovřesky" begins with "Ž", which is
+// not `\w`, so `\bŽabovřesky\b` never matches "Brno–Žabovřesky" at all
+// (non-word "–" next to non-word "Ž" is not a `\b` transition). This is
+// the exact bug that let a real Žabovřesky listing fall through district
+// detection. czBoundary rebuilds the same "whole word" guarantee using the
+// full Czech alphabet instead of ASCII-only `\w`.
+function czBoundary(name: string): RegExp {
+  const escaped = name.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&");
+  return new RegExp(`(?<![${CZ_W}])${escaped}(?![${CZ_W}])`, "i");
+}
 
 // --- Property Type Engine (item 2) — detected from explicit keywords only,
 // never inferred from ambiguous context. Order matters: more specific
@@ -177,14 +196,27 @@ export function extractFromText(text: string, sourceUrl?: string | null): Extrac
   }
 
   // --- Area m2 (labeled first) ---
+  // A dual figure like "cca 100/103 m²" (podlahová/užitná plocha written
+  // together, very common in Czech listings) is still two numbers the
+  // listing itself states explicitly — "cca" is the SOURCE's own
+  // approximation, not something DziFlip derived, so both stay VERIFIED.
+  const areaDual = t.match(/(\d{1,4}(?:[.,]\d+)?)\s*\/\s*(\d{1,4}(?:[.,]\d+)?)\s*m(?:²|2\b)/i);
   const areaLabeled = t.match(
     /(?:užitná\s+plocha|podlahová\s+plocha|plocha\s+bytu|celková\s+plocha)[^\d]{0,25}(\d{1,4}(?:[.,]\d+)?)\s*m/i
   );
-  if (areaLabeled) {
+  if (areaDual) {
+    setField(fields, meta, "areaM2", normalizeNumber(areaDual[1]), "VERIFIED");
+    setField(fields, meta, "usableAreaM2", normalizeNumber(areaDual[2]), "VERIFIED");
+  } else if (areaLabeled) {
     setField(fields, meta, "areaM2", normalizeNumber(areaLabeled[1]), "VERIFIED");
   } else {
+    // Any other bare "NNN m²" in the text is still literally stated by the
+    // listing, not an estimate DziFlip computed — VERIFIED, same as the
+    // labeled case above. Only a value this app itself *derives* (like
+    // pricePerM2 below, when it's not stated and has to be divided out)
+    // is ever tagged ESTIMATED.
     const areaAny = t.match(/(\d{2,4}(?:[.,]\d+)?)\s*m(?:²|2\b)(?!\s*pozemk)/i);
-    if (areaAny) setField(fields, meta, "areaM2", normalizeNumber(areaAny[1]), "ESTIMATED");
+    if (areaAny) setField(fields, meta, "areaM2", normalizeNumber(areaAny[1]), "VERIFIED");
   }
 
   // --- Price ---
@@ -202,7 +234,7 @@ export function extractFromText(text: string, sourceUrl?: string | null): Extrac
   }
 
   // --- Floor / total floors ---
-  const floorMatch = t.match(/(\d{1,2})\.\s*(?:nadzemní\s*)?(?:podlaží|patro)(?:\s*z\s*(\d{1,2}))?/i);
+  const floorMatch = t.match(/(\d{1,2})\.\s*(?:nadzemní\s*)?(?:podlaží|patro|NP)(?:\s*ze?\s*(\d{1,2}))?/i);
   if (floorMatch) {
     setField(fields, meta, "floor", floorMatch[1], "VERIFIED");
     if (floorMatch[2]) setField(fields, meta, "totalFloors", floorMatch[2], "VERIFIED");
@@ -276,8 +308,7 @@ export function extractFromText(text: string, sourceUrl?: string | null): Extrac
 
   // --- Municipality ---
   for (const city of MAJOR_CITIES) {
-    const re = new RegExp(`\\b${city.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&")}\\b`, "i");
-    if (re.test(t)) {
+    if (czBoundary(city).test(t)) {
       setField(fields, meta, "municipality", city, "VERIFIED");
       break;
     }
@@ -291,8 +322,7 @@ export function extractFromText(text: string, sourceUrl?: string | null): Extrac
   }
   if (!fields.district) {
     for (const d of districtList) {
-      const re = new RegExp(`\\b${d.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&")}\\b`, "i");
-      if (re.test(t)) {
+      if (czBoundary(d).test(t)) {
         setField(fields, meta, "district", d, "VERIFIED");
         break;
       }
@@ -303,9 +333,11 @@ export function extractFromText(text: string, sourceUrl?: string | null): Extrac
   const streetMatch = t.match(/(?:^|\n)\s*(?:Ulice|Adresa)\s*[:\-]\s*([^\n]{3,60})/i);
   if (streetMatch) setField(fields, meta, "street", streetMatch[1].trim(), "VERIFIED");
 
-  // --- Property type (item 2) ---
+  // --- Property type (item 2) --- detected from explicit keywords
+  // ("byt", "rodinný dům", "garáž", ...) actually present in the text, so
+  // this is a verified reading of the source, not a guess.
   const propertyType = detectPropertyType(t);
-  if (propertyType) setField(fields, meta, "propertyType", propertyType, "ESTIMATED");
+  if (propertyType) setField(fields, meta, "propertyType", propertyType, "VERIFIED");
 
   // --- Extended renovation-history signals (item 3) — never guessed, only
   // ever set from an explicit textual mention. ---
@@ -330,6 +362,79 @@ export function extractFromText(text: string, sourceUrl?: string | null): Extrac
 
   const risersYear = extractYear(t, /stoupačk\w*\D{0,15}(\d{4})/i);
   if (risersYear) setField(fields, meta, "risersYear", risersYear, "VERIFIED");
+
+  // --- Construction year (item 1, "rok výstavby") --- single shared
+  // capture group across every phrasing, so extractYear's m[1] always
+  // reads the year regardless of which alternative matched.
+  const constructionYear = extractYear(
+    t,
+    new RegExp(`(?:(?:d[uů]m|byt|nemovitost)\\s+z\\s+roku\\s*|rok\\s+výstavby[^\\d]{0,10}|postaven\\w*\\s+v?\\s*roce\\s*)(\\d{4})`, "i")
+  );
+  if (constructionYear) setField(fields, meta, "constructionYear", constructionYear, "VERIFIED");
+
+  // --- Heating (item 1, "vytápění") --- built with `new RegExp` + CZ_W
+  // (not a plain `\w*` literal) because every stem here is immediately
+  // followed by an accented Czech letter ("kondenzačního", "elektrické",
+  // ...) that ASCII-only `\w` cannot absorb.
+  const heatingKeywords: Array<[RegExp, string]> = [
+    [new RegExp(`plynov[${CZ_W}]*\\s+kondenzačn[${CZ_W}]*\\s+kotel`, "i"), "Plynový kondenzační kotel"],
+    [new RegExp(`plynov[${CZ_W}]*\\s+kotel`, "i"), "Plynový kotel"],
+    [new RegExp(`tepeln[${CZ_W}]*\\s+čerpadl[${CZ_W}]*`, "i"), "Tepelné čerpadlo"],
+    [new RegExp(`dálkov[${CZ_W}]*\\s+(?:topení|vytápění)`, "i"), "Dálkové vytápění"],
+    [new RegExp(`elektrick[${CZ_W}]*\\s+(?:topení|vytápění)`, "i"), "Elektrické vytápění"],
+    [new RegExp(`ústředn[${CZ_W}]*\\s+(?:topení|vytápění)`, "i"), "Ústřední vytápění"],
+    [new RegExp(`podlahov[${CZ_W}]*\\s+topení`, "i"), "Podlahové topení"]
+  ];
+  for (const [re, label] of heatingKeywords) {
+    if (re.test(t)) {
+      setField(fields, meta, "heatingType", label, "VERIFIED");
+      break;
+    }
+  }
+
+  // --- Monthly costs / repair fund (item 1) ---
+  const monthlyCostsMatch = t.match(
+    new RegExp(`měsíčn[${CZ_W}]*\\s+náklad[${CZ_W}]*[^\\d]{0,20}(\\d{1,3}(?:[\\s ]\\d{3})*)\\s*Kč`, "i")
+  );
+  if (monthlyCostsMatch) setField(fields, meta, "monthlyCosts", normalizeNumber(monthlyCostsMatch[1]), "VERIFIED");
+
+  const repairFundMatch = t.match(/fond\s+oprav[^\d]{0,20}(\d{1,3}(?:[\s ]\d{3})*)\s*Kč/i);
+  if (repairFundMatch) setField(fields, meta, "repairFund", normalizeNumber(repairFundMatch[1]), "VERIFIED");
+
+  // --- Important facts catch-all (item 1: "veškeré další explicitně
+  // uvedené důležité informace") — short, literal facts that don't fit a
+  // dedicated column. Each is only added when the exact phrase is present,
+  // never inferred or reworded into a claim the text didn't make (e.g.
+  // legal defects are NEVER invented here — only ever a positive match on
+  // an explicit mention).
+  const importantFacts: string[] = [];
+  const factChecks: Array<[RegExp, string]> = [
+    [/\bkrb\b/i, "Krb"],
+    [new RegExp(`plastov[${CZ_W}]*\\s+okn[${CZ_W}]*`, "i"), "Plastová okna"],
+    [new RegExp(`dřevěn[${CZ_W}]*\\s+okn[${CZ_W}]*`, "i"), "Dřevěná okna"],
+    [new RegExp(`garáž[${CZ_W}]*\\s+(?:je\\s+)?(?:zahrnut[${CZ_W}]*|v\\s+ceně)`, "i"), "Garáž zahrnuta v ceně"],
+    [new RegExp(`garáž[${CZ_W}]*\\s+není\\s+(?:zahrnut[${CZ_W}]*|v\\s+ceně)`, "i"), "Garáž NENÍ zahrnuta v ceně"],
+    [new RegExp(`vlastn[${CZ_W}]*\\s+garáž`, "i"), "Vlastní garáž"],
+    [new RegExp(`sklep[${CZ_W}]*\\s+(?:je\\s+)?(?:zahrnut[${CZ_W}]*|v\\s+ceně)`, "i"), "Sklep zahrnut v ceně"]
+  ];
+  for (const [re, label] of factChecks) {
+    if (re.test(t) && !importantFacts.includes(label)) importantFacts.push(label);
+  }
+  // Generic "<room/element> ... <year>" renovation mention that doesn't fit
+  // a dedicated column (windows/insulation/roof/risers already have their
+  // own fields above) — e.g. "koupelna + malování 2013".
+  const renovationElement = `(?:koupeln[${CZ_W}]*|kuchyň[${CZ_W}]*|malován[${CZ_W}]*|elektroinstalac[${CZ_W}]*)`;
+  const otherRenovationMatch = t.match(
+    new RegExp(`(${renovationElement}(?:\\s*[+,]\\s*${renovationElement})*)\\D{0,10}(\\d{4})\\b`, "i")
+  );
+  if (otherRenovationMatch) {
+    const year = parseInt(otherRenovationMatch[2], 10);
+    if (year >= 1900 && year <= CURRENT_YEAR + 1) {
+      importantFacts.push(`Rekonstrukce: ${otherRenovationMatch[1].trim()} (${year})`);
+    }
+  }
+
+  if (importantFacts.length > 0) setField(fields, meta, "importantFacts", JSON.stringify(importantFacts), "VERIFIED");
 
   // --- Land / house area (m² pozemku, distinct from the apartment-style areaM2) ---
   const landAreaMatch = t.match(/plocha\s+pozemku[^\d]{0,25}(\d{1,6}(?:[.,]\d+)?)\s*m/i);
