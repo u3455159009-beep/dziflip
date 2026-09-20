@@ -34,6 +34,14 @@ interface VisionProviderInfo {
   statusNote: string | null;
 }
 
+interface ImageGenProviderInfo {
+  key: string;
+  label: string;
+  status: "ACTIVE" | "PENDING_ACCESS";
+  statusNote: string | null;
+  healthStatus: "CONNECTED" | "PENDING_ACCESS" | "ERROR";
+}
+
 const CONFIDENCE_LABELS: Record<string, string> = {
   HIGH: "vysoká jistota",
   MEDIUM: "střední jistota",
@@ -47,6 +55,7 @@ export function PhotosGallery({ projectId, photos: initial }: { projectId: strin
   const [adding, setAdding] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [visionProvider, setVisionProvider] = useState<VisionProviderInfo | null>(null);
+  const [imageGenProvider, setImageGenProvider] = useState<ImageGenProviderInfo | null>(null);
   const [analyzing, setAnalyzing] = useState<string | null>(null);
   const [analyzeError, setAnalyzeError] = useState<Record<string, string>>({});
   const [genStyle, setGenStyle] = useState<Record<string, PhotoGenerationStyle>>({});
@@ -58,6 +67,10 @@ export function PhotosGallery({ projectId, photos: initial }: { projectId: strin
       .then((r) => r.json())
       .then((providers: VisionProviderInfo[]) => setVisionProvider(providers[0] ?? null))
       .catch(() => setVisionProvider(null));
+    fetch("/api/image-gen")
+      .then((r) => r.json())
+      .then((providers: ImageGenProviderInfo[]) => setImageGenProvider(providers.find((p) => p.status === "ACTIVE") ?? providers[0] ?? null))
+      .catch(() => setImageGenProvider(null));
   }, []);
 
   async function addPhoto() {
@@ -311,6 +324,15 @@ export function PhotosGallery({ projectId, photos: initial }: { projectId: strin
 
                       <div className="border-t border-line/60 pt-2">
                         <div className="text-[10px] uppercase tracking-wide text-muted">Vizualizace před/po</div>
+                        {imageGenProvider && (
+                          <div className="mt-0.5 text-[10px] text-muted">
+                            {imageGenProvider.healthStatus === "CONNECTED"
+                              ? `Připojeno: ${imageGenProvider.label}`
+                              : imageGenProvider.healthStatus === "ERROR"
+                                ? `${imageGenProvider.label}: poslední pokus selhal — zkuste to prosím znovu.`
+                                : `Zatím nepřipojeno${imageGenProvider.statusNote ? ` — ${imageGenProvider.statusNote}` : ""}`}
+                          </div>
+                        )}
                         <select
                           value={genStyle[photo.id] ?? PHOTO_GENERATION_STYLES[0]}
                           onChange={(e) => setGenStyle((s) => ({ ...s, [photo.id]: e.target.value as PhotoGenerationStyle }))}
@@ -384,6 +406,12 @@ export function PhotosGallery({ projectId, photos: initial }: { projectId: strin
                                         {g.requiresTechnicalReview && " Vyžaduje technické ověření."}
                                       </div>
                                     )}
+                                  </div>
+                                )}
+
+                                {g.status === "FAILED" && (
+                                  <div className="mt-1.5 rounded bg-band-badBg px-2 py-1 text-[10px] text-band-bad">
+                                    {g.failureReason || "Generování vizualizace selhalo."} Původní fotografie zůstává beze změny.
                                   </div>
                                 )}
                               </li>

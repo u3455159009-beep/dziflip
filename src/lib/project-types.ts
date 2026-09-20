@@ -15,6 +15,9 @@ export interface PhotoGenerationDTO {
   requiresTechnicalReview: boolean;
   estimatedRoomCost: number | null;
   confidence: string | null;
+  provider: string | null;
+  requestSignature: string | null;
+  failureReason: string | null;
 }
 
 export interface PhotoDTO {

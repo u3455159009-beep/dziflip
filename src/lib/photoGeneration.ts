@@ -3,9 +3,14 @@
 // provider when one is ACTIVE. With no image-gen provider connected, every
 // request is persisted as NOT_CONFIGURED — visible in the UI, never
 // silently dropped or faked as a real generation.
+//
+// Cache (item 13): before spending a paid API call, checks whether a
+// GENERATED result already exists for the exact same (photo, style,
+// prompt, RenovationPlan, provider) signature and reuses it instead.
 import { prisma } from "@/lib/prisma";
 import { getActiveImageGenProvider } from "@/lib/imageGen/registry";
-import type { RenovationPlanContext } from "@/lib/imageGen/types";
+import type { ImageGenRoomAnalysis, RenovationPlanContext } from "@/lib/imageGen/types";
+import { computeRequestSignature } from "@/lib/imageGen/cache";
 import { createRequirementsFromChangeDetection } from "@/lib/productSearch";
 import type { ChangeDetectionItem, PhotoGenerationStyle, RoomType } from "@/lib/types";
 
@@ -43,6 +48,34 @@ function toPlanContext(plan: {
   return { style, priceLevel, flooring, wallColor, doors, handles, outletsSwitches, lighting, kitchen, bathroomFixtures, tiles, sanitary, builtIns };
 }
 
+function toRoomAnalysis(photo: {
+  currentCondition: string | null;
+  visibleIssues: string | null;
+  replaceNotes: string | null;
+  renovationSuggestions: string | null;
+}): ImageGenRoomAnalysis | null {
+  if (!photo.currentCondition && !photo.visibleIssues && !photo.replaceNotes && !photo.renovationSuggestions) return null;
+  let visibleIssues: string[] = [];
+  if (photo.visibleIssues) {
+    try {
+      const parsed = JSON.parse(photo.visibleIssues);
+      if (Array.isArray(parsed)) visibleIssues = parsed;
+    } catch {
+      // malformed stored JSON — never let a parsing quirk break generation
+    }
+  }
+  return {
+    currentCondition: photo.currentCondition,
+    visibleIssues,
+    replaceNotes: photo.replaceNotes,
+    renovationSuggestions: photo.renovationSuggestions
+  };
+}
+
+async function logProviderFailure(providerKey: string, message: string) {
+  await prisma.providerErrorLog.create({ data: { provider: providerKey, errorMessage: message } }).catch(() => {});
+}
+
 export async function requestPhotoGeneration(photoId: string, style: PhotoGenerationStyle, prompt: string | null) {
   const photo = await prisma.photo.findUnique({ where: { id: photoId } });
   if (!photo) throw new Error("Fotografie nenalezena.");
@@ -51,6 +84,7 @@ export async function requestPhotoGeneration(photoId: string, style: PhotoGenera
   const renovationPlanId = plan?.id ?? null;
   const planContext = toPlanContext(plan);
   const roomType = (photo.roomType as RoomType | null) ?? null;
+  const roomAnalysis = toRoomAnalysis(photo);
 
   const provider = getActiveImageGenProvider();
   if (!provider) {
@@ -59,11 +93,22 @@ export async function requestPhotoGeneration(photoId: string, style: PhotoGenera
     });
   }
 
+  // Idempotency cache (item 13) — an identical (photo, style, prompt, plan,
+  // provider) request reuses the existing GENERATED result rather than
+  // spending another paid API call. A changed RenovationPlan (or style/
+  // prompt) produces a different signature, so it always misses the cache.
+  const signature = computeRequestSignature({ photoUrl: photo.url, style, prompt, providerKey: provider.key, planContext });
+  const cached = await prisma.photoGeneration.findFirst({
+    where: { photoId, requestSignature: signature, status: "GENERATED" },
+    orderBy: { generatedAt: "desc" }
+  });
+  if (cached) return cached;
+
   const pending = await prisma.photoGeneration.create({
-    data: { photoId, style, prompt, status: "PENDING", renovationPlanId }
+    data: { photoId, style, prompt, status: "PENDING", renovationPlanId, provider: provider.key, requestSignature: signature }
   });
   try {
-    const result = await provider.generate({ photoUrl: photo.url, style, prompt, roomType, planContext });
+    const result = await provider.generate({ photoUrl: photo.url, style, prompt, roomType, planContext, roomAnalysis });
     const generated = await prisma.photoGeneration.update({
       where: { id: pending.id },
       data: {
@@ -87,7 +132,15 @@ export async function requestPhotoGeneration(photoId: string, style: PhotoGenera
       );
     }
     return generated;
-  } catch {
-    return prisma.photoGeneration.update({ where: { id: pending.id }, data: { status: "FAILED" } });
+  } catch (err) {
+    // Never crash, never fabricate a result as a fallback — the original
+    // Photo row is untouched; only this generation attempt is marked
+    // FAILED with a safe, human-readable reason (never the API key).
+    const message = err instanceof Error ? err.message : "Vizualizaci se nepodařilo vygenerovat.";
+    await logProviderFailure(provider.key, message);
+    return prisma.photoGeneration.update({
+      where: { id: pending.id },
+      data: { status: "FAILED", failureReason: message }
+    });
   }
 }

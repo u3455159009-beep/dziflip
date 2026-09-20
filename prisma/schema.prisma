@@ -486,11 +486,21 @@ model PhotoGeneration {
   photo        Photo     @relation(fields: [photoId], references: [id], onDelete: Cascade)
   style        String // LEVNY_FLIP | MODERNI | PREMIUM | MINIMALISTICKY | SCANDI | LUXURY | CUSTOM
   prompt       String?
-  generatedUrl String?
+  generatedUrl String? // for Gemini: a data: URI (image/png|jpeg;base64,...) — no external object storage is wired up yet
   model        String?
   status       String    @default("NOT_CONFIGURED") // NOT_CONFIGURED | PENDING | GENERATED | FAILED
   createdAt    DateTime  @default(now())
   generatedAt  DateTime?
+
+  // Vendor-provider audit trail (item 14) — never the API key, only which
+  // provider/model produced this result and a signature for cache/replay
+  // auditing. provider is null for pre-Gemini rows and NOT_CONFIGURED ones.
+  provider         String? // provider key, e.g. "GEMINI"
+  requestSignature String? // sha256 of (photoUrl, style, prompt, renovationPlan fields, model) — idempotency cache key (item 13)
+  // Sanitized, human-readable reason when status=FAILED (safety rejection,
+  // no image returned, timeout, rate limited, malformed response, auth
+  // error, ...) — always safe to show the user, never contains the API key.
+  failureReason    String?
 
   // Renovation Visualization (items 4/6/8/18) — links this generation to the
   // project's shared design system so all rooms stay visually consistent.

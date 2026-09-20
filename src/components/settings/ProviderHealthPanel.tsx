@@ -17,6 +17,17 @@ interface ProviderHealthInfo {
   monthlyRequestBudget: number | null;
 }
 
+interface ImageGenHealthInfo {
+  key: string;
+  label: string;
+  status: "ACTIVE" | "PENDING_ACCESS";
+  statusNote: string | null;
+  healthStatus: "CONNECTED" | "PENDING_ACCESS" | "ERROR";
+  lastSuccessAt: string | null;
+  totalGenerated: number;
+  lastError: { message: string; occurredAt: string } | null;
+}
+
 const HEALTH_STYLES: Record<ProviderHealthInfo["healthStatus"], string> = {
   CONNECTED: "bg-band-goodBg text-band-good border-band-good/40",
   PENDING_ACCESS: "bg-beige-100 text-muted border-line",
@@ -33,13 +44,17 @@ const HEALTH_LABELS: Record<ProviderHealthInfo["healthStatus"], string> = {
 
 export function ProviderHealthPanel() {
   const [providers, setProviders] = useState<ProviderHealthInfo[]>([]);
+  const [imageGenProviders, setImageGenProviders] = useState<ImageGenHealthInfo[]>([]);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    fetch("/api/sources")
-      .then((r) => r.json())
-      .then((data) => {
-        setProviders(data);
+    Promise.all([
+      fetch("/api/sources").then((r) => r.json()),
+      fetch("/api/image-gen").then((r) => r.json())
+    ])
+      .then(([sources, imageGen]) => {
+        setProviders(sources);
+        setImageGenProviders(imageGen);
         setLoaded(true);
       })
       .catch(() => setLoaded(true));
@@ -89,6 +104,30 @@ export function ProviderHealthPanel() {
                   )}
                 </div>
               ))}
+          </div>
+
+          <div className="mt-6 border-t border-line pt-4">
+            <h4 className="mb-2 text-sm font-medium text-ink">AI Renovation Visualization (image-to-image)</h4>
+            <div className="space-y-2">
+              {imageGenProviders.map((p) => (
+                <div key={p.key} className="rounded-lg border border-line p-3 text-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-medium text-ink">{p.label}</span>
+                    <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[10px] font-medium uppercase ${HEALTH_STYLES[p.healthStatus]}`}>
+                      {HEALTH_LABELS[p.healthStatus]}
+                    </span>
+                  </div>
+                  {p.statusNote && <p className="mt-1 text-xs text-muted">{p.statusNote}</p>}
+                  {p.status === "ACTIVE" && (
+                    <div className="mt-2 grid grid-cols-1 gap-1 text-xs text-muted sm:grid-cols-3">
+                      <div>Poslední úspěšná vizualizace: {p.lastSuccessAt ? formatDateTime(p.lastSuccessAt) : "zatím žádná"}</div>
+                      <div>Vygenerováno celkem: {p.totalGenerated}</div>
+                      <div>{p.lastError ? `Poslední chyba: ${p.lastError.message} (${formatDateTime(p.lastError.occurredAt)})` : "Žádná chyba v logu"}</div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
         </>
       )}

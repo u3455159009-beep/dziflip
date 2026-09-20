@@ -217,12 +217,45 @@ Bez tohoto klíče appka i nadále funguje — jen srovnatelné nabídky je nutn
 doplňovat ručně (formulář „+ Přidat ručně" u Cenového enginu), přesně jako
 dosud.
 
-## 8. Shrnutí — co přesně nastavit ve Vercelu
+## 8. Gemini AI Renovation Visualization (image-to-image)
+
+Skutečná vizualizace „před/po" nad Google Gemini (`src/lib/imageGen/gemini/`)
+je hotová a čeká jen na klíč.
+
+1. Získej API klíč pro Gemini API (https://ai.google.dev/ nebo Google AI
+   Studio → API keys).
+2. Nastav v proměnných prostředí Vercelu (Production, **Sensitive**, nikdy
+   ne `NEXT_PUBLIC_...`):
+   ```
+   IMAGE_GEN_API_KEY=<tvůj klíč>
+   ```
+   Volitelně `GEMINI_IMAGE_MODEL`, pokud chceš přepsat výchozí
+   `gemini-2.5-flash-image` (např. na novější preview model, jakmile ho
+   budeš chtít vyzkoušet).
+3. Po redeploy:
+   - `/settings` → **Provider Health** → sekce „AI Renovation Visualization"
+     ukáže `Google Gemini (image-to-image)` jako PŘIPOJENO (nebo CHYBA s
+     posledním bezpečným chybovým hlášením, pokud klíč nefunguje).
+   - Na detailu nemovitosti, u libovolné fotografie s vyplněným
+     rekonstrukčním plánem (`RenovationPlan`), tlačítko „Vygenerovat"
+     skutečně upraví PŮVODNÍ fotografii podle plánu (image-to-image edit,
+     ne generování nové místnosti) a zobrazí ji vedle originálu jako
+     „AI VIZUALIZACE".
+   - Stejný požadavek (stejná fotka + styl/prompt + stejný rekonstrukční
+     plán) podruhé nespotřebuje další placené volání — použije se
+     existující výsledek z cache.
+
+Bez tohoto klíče appka i nadále funguje přesně jako dosud — požadavek na
+vizualizaci se uloží jako `NOT_CONFIGURED`, nikdy se nefingáže hotový
+výsledek.
+
+## 9. Shrnutí — co přesně nastavit ve Vercelu
 
 | Proměnná | Hodnota |
 |---|---|
 | `DATABASE_URL` | Connection string k tvé Prisma Postgres databázi — Vercel ho vloží sám při připojení databáze k projektu |
 | `FLATSCAN_API_KEY` | *(volitelné, ale doporučené)* Jakmile ho dostaneš od FlatScanu, přidej ho do Vercelu a redeployni — aktivuje automatické comparables, listing discovery, historii cen a lokalitní kontext (viz bod 7.1). Bez něj appka běží dál stejně jako dosud, jen bez těchto automatizací. |
+| `IMAGE_GEN_API_KEY` | *(volitelné)* Google Gemini API klíč — aktivuje skutečnou AI vizualizaci rekonstrukce (viz bod 8). Výhradně server-side proměnná, nikdy `NEXT_PUBLIC_...`. |
 
 Vše ostatní z `.env.example` (SMTP, SMS API, Vision API…) je **volitelné** —
 appka bez nich normálně běží, jen příslušné funkce zůstanou v bezpečném

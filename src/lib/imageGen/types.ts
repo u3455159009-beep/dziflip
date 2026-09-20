@@ -23,12 +23,24 @@ export interface RenovationPlanContext {
   builtIns: string | null;
 }
 
+// Relevant room analysis (item 5 of Photo Understanding) passed through so
+// the provider's prompt can reference the room's actual current condition
+// instead of guessing it — every field here comes straight from the Photo
+// row (manual or AI Vision), never invented by the image-gen provider.
+export interface ImageGenRoomAnalysis {
+  currentCondition: string | null;
+  visibleIssues: string[];
+  replaceNotes: string | null;
+  renovationSuggestions: string | null;
+}
+
 export interface ImageGenRequest {
   photoUrl: string;
   style: PhotoGenerationStyle;
   prompt: string | null;
   roomType: RoomType | null;
   planContext: RenovationPlanContext | null;
+  roomAnalysis: ImageGenRoomAnalysis | null;
 }
 
 export interface ImageGenResult {
