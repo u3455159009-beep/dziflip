@@ -34,6 +34,8 @@ export interface PhotoDTO {
   sourceListingUrl: string | null;
   matchConfidence: string | null;
   retrievedAt: string | null;
+  mimeType: string | null;
+  fileSizeBytes: number | null;
   roomType: string | null;
   currentCondition: string | null;
   visibleIssues: string | null;

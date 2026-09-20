@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { Button, Card, Input, SectionTitle } from "@/components/ui";
 import {
   ROOM_TYPES,
@@ -49,10 +49,19 @@ const CONFIDENCE_LABELS: Record<string, string> = {
   VERIFIED: "ručně ověřeno"
 };
 
+// Must match src/lib/photoUpload.ts exactly — this is only a client-side
+// pre-check for instant feedback; the server always re-validates for real.
+const ALLOWED_UPLOAD_MIME_TYPES = ["image/jpeg", "image/png", "image/webp"];
+const MAX_UPLOAD_FILE_SIZE_BYTES = 8 * 1024 * 1024;
+
 export function PhotosGallery({ projectId, photos: initial }: { projectId: string; photos: PhotoDTO[] }) {
   const [photos, setPhotos] = useState(initial);
   const [newUrl, setNewUrl] = useState("");
   const [adding, setAdding] = useState(false);
+  const [showUrlField, setShowUrlField] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [visionProvider, setVisionProvider] = useState<VisionProviderInfo | null>(null);
   const [imageGenProvider, setImageGenProvider] = useState<ImageGenProviderInfo | null>(null);
@@ -86,9 +95,58 @@ export function PhotosGallery({ projectId, photos: initial }: { projectId: strin
         const photo = await res.json();
         setPhotos((p) => [...p, photo]);
         setNewUrl("");
+        setShowUrlField(false);
+      } else {
+        const body = await res.json().catch(() => null);
+        setUploadError(body?.error || "Přidání fotografie podle URL selhalo.");
       }
     } finally {
       setAdding(false);
+    }
+  }
+
+  function openFilePicker() {
+    if (uploading) return; // guard against a double-trigger while one upload is already in flight
+    setUploadError(null);
+    fileInputRef.current?.click();
+  }
+
+  async function handleFileSelected(e: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    // Always reset the input value so selecting the exact same file again
+    // still fires onChange next time.
+    e.target.value = "";
+    if (files.length === 0 || uploading) return;
+
+    setUploading(true);
+    setUploadError(null);
+    try {
+      for (const file of files) {
+        if (!ALLOWED_UPLOAD_MIME_TYPES.includes(file.type)) {
+          setUploadError(`Nepodporovaný formát souboru „${file.name}" (${file.type || "neznámý typ"}). Povolené formáty: JPG, JPEG, PNG, WEBP.`);
+          continue;
+        }
+        if (file.size > MAX_UPLOAD_FILE_SIZE_BYTES) {
+          setUploadError(`Soubor „${file.name}" je příliš velký (${(file.size / (1024 * 1024)).toFixed(1)} MB). Maximum je ${MAX_UPLOAD_FILE_SIZE_BYTES / (1024 * 1024)} MB.`);
+          continue;
+        }
+
+        const formData = new FormData();
+        formData.append("file", file);
+        try {
+          const res = await fetch(`/api/projects/${projectId}/photos/upload`, { method: "POST", body: formData });
+          const body = await res.json().catch(() => null);
+          if (res.ok && body) {
+            setPhotos((p) => [...p, body]);
+          } else {
+            setUploadError(body?.error || `Nahrání souboru „${file.name}" selhalo.`);
+          }
+        } catch {
+          setUploadError(`Nahrání souboru „${file.name}" selhalo — zkontrolujte připojení a zkuste to znovu.`);
+        }
+      }
+    } finally {
+      setUploading(false);
     }
   }
 
@@ -185,16 +243,49 @@ export function PhotosGallery({ projectId, photos: initial }: { projectId: strin
         Fotografie
       </SectionTitle>
 
-      <div className="mb-5 flex gap-3">
-        <Input
-          placeholder="URL fotografie…"
-          value={newUrl}
-          onChange={(e) => setNewUrl(e.target.value)}
-          className="flex-1"
-        />
-        <Button variant="secondary" onClick={addPhoto} disabled={adding}>
-          {adding ? "Přidávám…" : "+ Přidat"}
-        </Button>
+      <div className="mb-5 space-y-2">
+        <div className="flex flex-wrap items-center gap-3">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            multiple
+            className="hidden"
+            onChange={handleFileSelected}
+            data-testid="photo-file-input"
+          />
+          <Button variant="secondary" onClick={openFilePicker} disabled={uploading}>
+            {uploading ? "Nahrávám…" : "+ Přidat"}
+          </Button>
+          <button
+            type="button"
+            onClick={() => setShowUrlField((v) => !v)}
+            className="text-[11px] font-medium text-beige-500 underline underline-offset-2"
+          >
+            {showUrlField ? "skrýt vložení přes URL" : "nebo vložit URL fotografie"}
+          </button>
+        </div>
+        <p className="text-[11px] text-muted">Podporované formáty: JPG, JPEG, PNG, WEBP — max. {MAX_UPLOAD_FILE_SIZE_BYTES / (1024 * 1024)} MB na soubor.</p>
+
+        {showUrlField && (
+          <div className="flex gap-3">
+            <Input
+              placeholder="URL fotografie…"
+              value={newUrl}
+              onChange={(e) => setNewUrl(e.target.value)}
+              className="flex-1"
+            />
+            <Button variant="secondary" onClick={addPhoto} disabled={adding}>
+              {adding ? "Přidávám…" : "Přidat URL"}
+            </Button>
+          </div>
+        )}
+
+        {uploadError && (
+          <p className="rounded-md bg-band-badBg px-3 py-2 text-xs text-band-bad" role="alert">
+            {uploadError}
+          </p>
+        )}
       </div>
 
       {photos.length === 0 ? (
@@ -220,6 +311,14 @@ export function PhotosGallery({ projectId, photos: initial }: { projectId: strin
                       title={`Zkopírováno z nalezeného inzerátu (${photo.matchConfidence ?? "?"})`}
                     >
                       z inzerátu
+                    </span>
+                  )}
+                  {photo.sourcePhotoProvider === "MANUAL_UPLOAD" && (
+                    <span
+                      className="absolute right-2 top-2 rounded-full bg-ink/80 px-2 py-0.5 text-[9px] font-medium text-white"
+                      title="Nahráno ručně — použitelné jako ORIGINAL vstup pro AI vizualizaci"
+                    >
+                      PŮVODNÍ
                     </span>
                   )}
                 </div>
@@ -324,41 +423,44 @@ export function PhotosGallery({ projectId, photos: initial }: { projectId: strin
 
                       <div className="border-t border-line/60 pt-2">
                         <div className="text-[10px] uppercase tracking-wide text-muted">Vizualizace před/po</div>
-                        {imageGenProvider && (
+                        {imageGenProvider?.healthStatus === "CONNECTED" ? (
+                          <>
+                            <div className="mt-0.5 text-[10px] text-muted">Připojeno: {imageGenProvider.label}</div>
+                            <select
+                              value={genStyle[photo.id] ?? PHOTO_GENERATION_STYLES[0]}
+                              onChange={(e) => setGenStyle((s) => ({ ...s, [photo.id]: e.target.value as PhotoGenerationStyle }))}
+                              className="mt-1 w-full rounded-md border border-line bg-card px-2 py-1.5 text-xs"
+                            >
+                              {PHOTO_GENERATION_STYLES.map((s) => (
+                                <option key={s} value={s}>
+                                  {PHOTO_GENERATION_STYLE_LABELS[s as PhotoGenerationStyle]}
+                                </option>
+                              ))}
+                            </select>
+                            <textarea
+                              value={genPrompt[photo.id] ?? ""}
+                              onChange={(e) => setGenPrompt((s) => ({ ...s, [photo.id]: e.target.value }))}
+                              placeholder="Prompt / zadání pro vizualizaci (volitelné)…"
+                              rows={2}
+                              className="mt-1 w-full rounded-md border border-line bg-card px-2 py-1.5 text-xs"
+                            />
+                            <Button
+                              variant="secondary"
+                              onClick={() => requestGeneration(photo.id)}
+                              disabled={generating === photo.id}
+                              className="mt-1 w-full text-xs"
+                              data-testid={`generate-visualization-${photo.id}`}
+                            >
+                              {generating === photo.id ? "Ukládám zadání…" : "Vygenerovat vizualizaci"}
+                            </Button>
+                          </>
+                        ) : (
                           <div className="mt-0.5 text-[10px] text-muted">
-                            {imageGenProvider.healthStatus === "CONNECTED"
-                              ? `Připojeno: ${imageGenProvider.label}`
-                              : imageGenProvider.healthStatus === "ERROR"
-                                ? `${imageGenProvider.label}: poslední pokus selhal — zkuste to prosím znovu.`
-                                : `Zatím nepřipojeno${imageGenProvider.statusNote ? ` — ${imageGenProvider.statusNote}` : ""}`}
+                            {imageGenProvider?.healthStatus === "ERROR"
+                              ? `${imageGenProvider.label}: poslední pokus selhal — zkuste to prosím znovu později.`
+                              : `AI vizualizace zatím není připojena${imageGenProvider?.statusNote ? ` — ${imageGenProvider.statusNote}` : ""}.`}
                           </div>
                         )}
-                        <select
-                          value={genStyle[photo.id] ?? PHOTO_GENERATION_STYLES[0]}
-                          onChange={(e) => setGenStyle((s) => ({ ...s, [photo.id]: e.target.value as PhotoGenerationStyle }))}
-                          className="mt-1 w-full rounded-md border border-line bg-card px-2 py-1.5 text-xs"
-                        >
-                          {PHOTO_GENERATION_STYLES.map((s) => (
-                            <option key={s} value={s}>
-                              {PHOTO_GENERATION_STYLE_LABELS[s as PhotoGenerationStyle]}
-                            </option>
-                          ))}
-                        </select>
-                        <textarea
-                          value={genPrompt[photo.id] ?? ""}
-                          onChange={(e) => setGenPrompt((s) => ({ ...s, [photo.id]: e.target.value }))}
-                          placeholder="Prompt / zadání pro vizualizaci (volitelné)…"
-                          rows={2}
-                          className="mt-1 w-full rounded-md border border-line bg-card px-2 py-1.5 text-xs"
-                        />
-                        <Button
-                          variant="secondary"
-                          onClick={() => requestGeneration(photo.id)}
-                          disabled={generating === photo.id}
-                          className="mt-1 w-full text-xs"
-                        >
-                          {generating === photo.id ? "Ukládám zadání…" : "Vygenerovat"}
-                        </Button>
 
                         {photo.generations.length > 0 && (
                           <ul className="mt-2 space-y-2">

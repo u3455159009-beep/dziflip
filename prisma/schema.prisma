@@ -447,15 +447,22 @@ model Photo {
   sortOrder Int      @default(0)
   createdAt DateTime @default(now())
 
-  // Provenance (item 1/2, Listing Photo Discovery) — only ever set when this
-  // photo was copied from a specific matched listing via a real provider or
-  // direct-URL fetch. Never set for a manually-uploaded/pasted photo.
-  sourcePhotoProvider     String? // provider key that supplied this photo, e.g. "WEB_SEARCH", "DIRECT_URL" — null for manual uploads
+  // Provenance (item 1/2, Listing Photo Discovery) — set when this photo
+  // was copied from a specific matched listing via a real provider/direct-
+  // URL fetch ("WEB_SEARCH", "DIRECT_URL", a matched listing provider key)
+  // or was uploaded by the user directly ("MANUAL_UPLOAD"). Null only for
+  // the legacy manual-URL-paste path (POST .../photos with a raw url).
+  sourcePhotoProvider     String? // e.g. "WEB_SEARCH", "DIRECT_URL", "MANUAL_UPLOAD"
   sourceListingProvider   String? // matched-listing provider key, e.g. "FLATSCAN" — from Listing Discovery, may differ from sourcePhotoProvider
   sourceListingExternalId String? // matched listing's external id, when known
   sourceListingUrl        String? // the exact listing URL this photo was copied from
   matchConfidence         String? // EXACT_MATCH | HIGH_CONFIDENCE_MATCH | POSSIBLE_MATCH — confidence of the listing match at copy time
-  retrievedAt              DateTime? // when this photo URL was actually fetched/copied — null for manual uploads
+  retrievedAt              DateTime? // when this photo URL was actually fetched/copied/uploaded — null for the legacy manual-URL-paste path
+
+  // Real Photo Upload (Vercel Blob storage) — set only for a file the user
+  // actually uploaded through the file picker, never guessed.
+  mimeType      String? // validated MIME type at upload time, e.g. "image/jpeg"
+  fileSizeBytes Int? // real uploaded file size in bytes
 
   // AI Photo Analysis (Vision provider architecture) — fillable manually
   // today, by a real Vision provider later; analysisSource always says which.

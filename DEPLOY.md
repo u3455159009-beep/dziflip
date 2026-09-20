@@ -249,13 +249,49 @@ Bez tohoto klíče appka i nadále funguje přesně jako dosud — požadavek na
 vizualizaci se uloží jako `NOT_CONFIGURED`, nikdy se nefingáže hotový
 výsledek.
 
-## 9. Shrnutí — co přesně nastavit ve Vercelu
+## 9. Photo Upload — Vercel Blob storage (vyžadováno pro tlačítko „+ Přidat")
+
+Nahrávání fotografií souborem (JPG/JPEG/PNG/WEBP) ukládá skutečné bajty do
+**Vercel Blob** (`src/lib/photoUpload.ts`) — nikdy do dočasného
+filesystemu serverless funkce, který se mezi requesty maže. Bez připojeného
+Blob storu appka upload čestně odmítne srozumitelnou chybou, nikdy nepředstírá,
+že se soubor uložil.
+
+1. Ve Vercel dashboardu: **Project → Storage → Create Database → Blob** a
+   store připoj k tomuto projektu (stačí kliknout „Connect Project").
+2. Vercel sám vloží proměnnou **`BLOB_READ_WRITE_TOKEN`** do Production (a
+   Preview) environment — **nic sám nevymýšlej ani nekopíruj odjinud**,
+   token vygeneruje a doplní Vercel.
+3. Po redeploy:
+   - `/project/[id]` → sekce **Fotografie** → tlačítko „+ Přidat" otevře
+     systémový výběr souboru, nahraný soubor se uloží do Blob storage a
+     hned se zobrazí v galerii — přežije refresh stránky.
+   - Nahraná fotografie má `sourcePhotoProvider = "MANUAL_UPLOAD"` a je
+     okamžitě použitelná jako ORIGINAL vstup pro Gemini image-to-image
+     pipeline (bod 8) — appka jen znovu stáhne `Photo.url`, stejně jako u
+     jakéhokoliv jiného zdroje fotografie.
+
+Bez `BLOB_READ_WRITE_TOKEN` appka i nadále funguje — nahrání souboru vrátí
+srozumitelnou chybu („Úložiště fotografií není připojeno"), URL-based
+přidání fotografie (`nebo vložit URL fotografie`) funguje beze změny jako
+dosud.
+
+**Limity.** Appka sama odmítá soubory nad 8 MB a mimo JPG/JPEG/PNG/WEBP.
+Nezávisle na tom má i Vercel vlastní platformní limit velikosti request body
+u Route Handlerů (typicky ~4,5 MB na běžných plánech) — větší soubor může
+být odmítnut ještě dřív, než ho appka stihne zpracovat; pokud to bude v praxi
+limitující, řešením je buď zvýšit limit ve Vercel projektu, nebo přejít na
+přímý client-side upload přes `@vercel/blob/client` (`upload()` s
+server-side vydávaným tokenem) — to není v tomto kroku implementováno.
+
+## 10. Shrnutí — co přesně nastavit ve Vercelu
 
 | Proměnná | Hodnota |
 |---|---|
 | `DATABASE_URL` | Connection string k tvé Prisma Postgres databázi — Vercel ho vloží sám při připojení databáze k projektu |
 | `FLATSCAN_API_KEY` | *(volitelné, ale doporučené)* Jakmile ho dostaneš od FlatScanu, přidej ho do Vercelu a redeployni — aktivuje automatické comparables, listing discovery, historii cen a lokalitní kontext (viz bod 7.1). Bez něj appka běží dál stejně jako dosud, jen bez těchto automatizací. |
 | `IMAGE_GEN_API_KEY` | *(volitelné)* Google Gemini API klíč — aktivuje skutečnou AI vizualizaci rekonstrukce (viz bod 8). Výhradně server-side proměnná, nikdy `NEXT_PUBLIC_...`. |
+| `BLOB_READ_WRITE_TOKEN` | **(doporučené — bez něj nefunguje upload souboru)** Vercel ho vloží sám po připojení Blob storu k projektu (viz bod 9). |
 
 Vše ostatní z `.env.example` (SMTP, SMS API, Vision API…) je **volitelné** —
 appka bez nich normálně běží, jen příslušné funkce zůstanou v bezpečném

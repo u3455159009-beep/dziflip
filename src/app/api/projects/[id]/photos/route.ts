@@ -15,5 +15,5 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       sortOrder: count
     }
   });
-  return NextResponse.json(photo);
+  return NextResponse.json({ ...photo, generations: [] });
 }
