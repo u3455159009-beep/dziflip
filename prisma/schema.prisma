@@ -523,6 +523,13 @@ model PhotoGeneration {
   // no image returned, timeout, rate limited, malformed response, auth
   // error, ...) — always safe to show the user, never contains the API key.
   failureReason    String?
+  // Machine-readable diagnostic code paired with failureReason (e.g.
+  // GEMINI_AUTH_FAILED, GEMINI_DNS_OR_NETWORK_FAILED, GEMINI_TIMEOUT,
+  // GEMINI_RATE_LIMITED, GEMINI_BAD_REQUEST, GEMINI_MODEL_NOT_AVAILABLE,
+  // GEMINI_RESPONSE_INVALID, DOWNLOAD_ORIGINAL_FAILED, BLOB_SAVE_FAILED) —
+  // lets logs/tests/Provider Health distinguish the real failure stage
+  // without parsing the Czech message text.
+  failureCode      String?
 
   // Renovation Visualization (items 4/6/8/18) — links this generation to the
   // project's shared design system so all rooms stay visually consistent.

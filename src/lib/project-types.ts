@@ -18,6 +18,7 @@ export interface PhotoGenerationDTO {
   provider: string | null;
   requestSignature: string | null;
   failureReason: string | null;
+  failureCode: string | null;
 }
 
 export interface PhotoDTO {

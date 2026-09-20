@@ -146,7 +146,8 @@ describe("saveUploadedPhoto — real persistent storage, real DB row", () => {
         // as the ORIGINAL to edit — not a placeholder, not a new room.
         expect(request.photoUrl).toBe(blobUrl);
         return {
-          generatedUrl: "data:image/png;base64,ZmFrZQ==",
+          imageBase64: "ZmFrZQ==",
+          mimeType: "image/png",
           model: "test-model",
           changeDetection: [],
           structuralChange: false,
@@ -156,6 +157,7 @@ describe("saveUploadedPhoto — real persistent storage, real DB row", () => {
       }
     };
     IMAGE_GEN_PROVIDERS.push(mockImageGen);
+    mockBlobSuccess("https://abc123.public.blob.vercel-storage.com/projects/x/generations/after.png"); // AFTER image's own Blob save
     try {
       const generation = await requestPhotoGeneration(photo.id, "MODERNI", null);
       expect(generation.status).toBe("GENERATED");

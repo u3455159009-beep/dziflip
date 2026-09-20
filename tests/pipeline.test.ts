@@ -6,6 +6,14 @@
 // provider-unavailable/WAITING_FOR_PROVIDER case, and no-fabricated-data
 // guarantees in the new pipeline/RenovationPlan-generator code paths.
 import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from "vitest";
+
+// photoGeneration.ts saves every GENERATED result's real bytes to Vercel
+// Blob — @vercel/blob's put() uses its own internal undici fetch, not the
+// global one, so the module itself is mocked (as in every other test file
+// exercising the image-generation path) rather than trying to intercept
+// global.fetch for it.
+vi.mock("@vercel/blob", () => ({ put: vi.fn() }));
+import { put } from "@vercel/blob";
 import { prisma } from "@/lib/prisma";
 import { updateSettings } from "@/lib/settings";
 import { computePipelineState, advancePipeline } from "@/lib/pipeline";
@@ -21,7 +29,20 @@ import type { AssumptionsInput } from "@/lib/calc";
 
 const originalImageKey = process.env.IMAGE_GEN_API_KEY;
 const originalProductKey = process.env.PRODUCT_SEARCH_API_KEY;
+const originalBlobToken = process.env.BLOB_READ_WRITE_TOKEN;
 const originalFetch = global.fetch;
+const putMock = vi.mocked(put);
+
+// Always succeeds by default — none of these pipeline tests are about Blob
+// failure modes specifically (that's covered in tests/geminiImageGen.test.ts);
+// here it just needs to not be the thing blocking an otherwise-correct
+// automatic pipeline run.
+function mockBlobAlwaysSucceeds() {
+  putMock.mockImplementation(async (pathname: unknown, _body: unknown, opts: unknown) => {
+    const url = `https://abc123.public.blob.vercel-storage.com/${pathname}`;
+    return { url, downloadUrl: `${url}?download=1`, pathname, contentType: (opts as any)?.contentType ?? "image/png" } as any;
+  });
+}
 
 async function wipeDb() {
   // Every domain table hangs off Project with onDelete: Cascade, so
@@ -37,7 +58,10 @@ async function resetEnv() {
   else process.env.IMAGE_GEN_API_KEY = originalImageKey;
   if (originalProductKey === undefined) delete process.env.PRODUCT_SEARCH_API_KEY;
   else process.env.PRODUCT_SEARCH_API_KEY = originalProductKey;
+  if (originalBlobToken === undefined) delete process.env.BLOB_READ_WRITE_TOKEN;
+  else process.env.BLOB_READ_WRITE_TOKEN = originalBlobToken;
   global.fetch = originalFetch;
+  putMock.mockReset();
   await updateSettings({ aiPhotoAnalysisEnabled: false });
 }
 
@@ -388,6 +412,8 @@ describe("advancePipeline — one bounded step at a time, entirely automatic (Ze
 
   it("10. once a RenovationPlan exists, advancePipeline generates a Before/After visualization for an eligible photo and derives real ProductRequirements from Change Detection — no click", async () => {
     process.env.IMAGE_GEN_API_KEY = "test-key";
+    process.env.BLOB_READ_WRITE_TOKEN = "test-blob-token";
+    mockBlobAlwaysSucceeds();
     const project = await createProject({ lastComparableDiscoveryAt: new Date() });
     await createAssumptions(project.id);
     const plan = await prisma.renovationPlan.create({
@@ -436,6 +462,8 @@ describe("advancePipeline — one bounded step at a time, entirely automatic (Ze
   it("12. the full chain — comparables, photo analysis, plan, visualization, products, budget check — reaches DONE entirely automatically, ending WITHIN_BUDGET", async () => {
     process.env.IMAGE_GEN_API_KEY = "test-key";
     process.env.PRODUCT_SEARCH_API_KEY = "test-key";
+    process.env.BLOB_READ_WRITE_TOKEN = "test-blob-token";
+    mockBlobAlwaysSucceeds();
     await updateSettings({ aiPhotoAnalysisEnabled: true });
     const project = await createProject();
     await createAssumptions(project.id);
@@ -468,6 +496,8 @@ describe("advancePipeline — one bounded step at a time, entirely automatic (Ze
   it("13. once DONE, advancePipeline is idempotent — no further provider calls, no duplicate photos/products/budget lines", async () => {
     process.env.IMAGE_GEN_API_KEY = "test-key";
     process.env.PRODUCT_SEARCH_API_KEY = "test-key";
+    process.env.BLOB_READ_WRITE_TOKEN = "test-blob-token";
+    mockBlobAlwaysSucceeds();
     await updateSettings({ aiPhotoAnalysisEnabled: true });
     const project = await createProject();
     await createAssumptions(project.id);

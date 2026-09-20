@@ -1,14 +1,17 @@
 // Provider Health for the image-generation/visualization pipeline (item
-// 15 of the Gemini phase) — mirrors /api/sources/route.ts's derivation
-// exactly: PENDING_ACCESS when no key, otherwise CONNECTED unless the most
-// recent logged error is newer than the most recent successful generation,
-// in which case ERROR. lastError only ever carries the sanitized message
-// already produced by the provider — never the API key.
+// 15 of the Gemini phase; item 5 of the production-fix phase). Real,
+// verified status only: PENDING_ACCESS when no key, UNVERIFIED when a key
+// is configured but no real request has ever succeeded or failed,
+// otherwise CONNECTED/ERROR from whichever real attempt (success or
+// logged failure) is most recent. A configured key alone is NEVER reported
+// as CONNECTED — that claim requires at least one real, observed outcome
+// (real usage, or the on-demand smoke test at POST .../smoke-test).
+// lastError only ever carries the sanitized message already produced by
+// the provider — never the API key.
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { IMAGE_GEN_PROVIDERS } from "@/lib/imageGen/registry";
-
-type ImageGenHealthStatus = "CONNECTED" | "PENDING_ACCESS" | "ERROR";
+import { deriveImageGenHealthStatus, type ImageGenHealthStatus } from "@/lib/imageGen/health";
 
 export async function GET() {
   const providers = await Promise.all(
@@ -22,19 +25,24 @@ export async function GET() {
           healthStatus: "PENDING_ACCESS" as ImageGenHealthStatus,
           lastSuccessAt: null as string | null,
           totalGenerated: 0,
-          lastError: null as { message: string; occurredAt: string } | null
+          lastError: null as { message: string; occurredAt: string } | null,
+          lastFailureCode: null as string | null
         };
       }
 
-      const [lastSuccess, totalGenerated, lastErrorLog] = await Promise.all([
+      const [lastSuccess, totalGenerated, lastErrorLog, lastFailedGeneration] = await Promise.all([
         prisma.photoGeneration.findFirst({ where: { provider: p.key, status: "GENERATED" }, orderBy: { generatedAt: "desc" } }),
         prisma.photoGeneration.count({ where: { provider: p.key, status: "GENERATED" } }),
-        prisma.providerErrorLog.findFirst({ where: { provider: p.key }, orderBy: { occurredAt: "desc" } })
+        prisma.providerErrorLog.findFirst({ where: { provider: p.key }, orderBy: { occurredAt: "desc" } }),
+        prisma.photoGeneration.findFirst({ where: { provider: p.key, status: "FAILED" }, orderBy: { createdAt: "desc" } })
       ]);
 
       const lastSuccessAt = lastSuccess?.generatedAt ?? null;
-      const healthStatus: ImageGenHealthStatus =
-        lastErrorLog && (!lastSuccessAt || lastErrorLog.occurredAt > lastSuccessAt) ? "ERROR" : "CONNECTED";
+      const healthStatus = deriveImageGenHealthStatus({
+        configured: true,
+        lastSuccessAt,
+        lastErrorAt: lastErrorLog?.occurredAt ?? null
+      });
 
       return {
         key: p.key,
@@ -44,7 +52,8 @@ export async function GET() {
         healthStatus,
         lastSuccessAt: lastSuccessAt ? lastSuccessAt.toISOString() : null,
         totalGenerated,
-        lastError: lastErrorLog ? { message: lastErrorLog.errorMessage, occurredAt: lastErrorLog.occurredAt.toISOString() } : null
+        lastError: lastErrorLog ? { message: lastErrorLog.errorMessage, occurredAt: lastErrorLog.occurredAt.toISOString() } : null,
+        lastFailureCode: lastFailedGeneration?.failureCode ?? null
       };
     })
   );

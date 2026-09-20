@@ -44,7 +44,13 @@ export interface ImageGenRequest {
 }
 
 export interface ImageGenResult {
-  generatedUrl: string;
+  // Raw generated image bytes — the caller (photoGeneration.ts) owns
+  // persistence (uploading to Vercel Blob and computing the final,
+  // durable URL), so a vendor provider never has to know anything about
+  // object storage. Never a data: URI here — that would get base64-encoded
+  // straight into the database, which is exactly what this replaces.
+  imageBase64: string;
+  mimeType: string;
   model: string;
   // Change Detection (item 8) — which item kinds the visualization actually
   // changed vs. the original photo, as reported by the provider itself.
@@ -59,7 +65,18 @@ export interface ImageGenResult {
   confidence: "HIGH" | "MEDIUM" | "LOW";
 }
 
-export class ImageGenNotAvailableError extends Error {}
+// `code` carries the machine-readable diagnostic taxonomy (e.g.
+// "GEMINI_AUTH_FAILED", "DOWNLOAD_ORIGINAL_FAILED", "BLOB_SAVE_FAILED") end
+// to end from the client that detected the failure, through the provider,
+// to photoGeneration.ts, which persists it as PhotoGeneration.failureCode
+// — never inferred later from parsing the human-readable message.
+export class ImageGenNotAvailableError extends Error {
+  code: string;
+  constructor(message: string, code: string = "GEMINI_RESPONSE_INVALID") {
+    super(message);
+    this.code = code;
+  }
+}
 
 export interface ImageGenProvider {
   key: string;

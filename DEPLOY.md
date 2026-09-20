@@ -220,7 +220,10 @@ dosud.
 ## 8. Gemini AI Renovation Visualization (image-to-image)
 
 Skutečná vizualizace „před/po" nad Google Gemini (`src/lib/imageGen/gemini/`)
-je hotová a čeká jen na klíč.
+je hotová a čeká jen na klíč. Vyžaduje **oba** klíče/proměnné níže — bez
+připojeného Vercel Blob storu (bod 9) se vygenerovaný obrázek nemá kam
+uložit a generace skončí jako `FAILED` (`BLOB_SAVE_FAILED`), i když Gemini
+samo odpoví úspěšně.
 
 1. Získej API klíč pro Gemini API (https://ai.google.dev/ nebo Google AI
    Studio → API keys).
@@ -229,21 +232,43 @@ je hotová a čeká jen na klíč.
    ```
    IMAGE_GEN_API_KEY=<tvůj klíč>
    ```
-   Volitelně `GEMINI_IMAGE_MODEL`, pokud chceš přepsat výchozí
-   `gemini-2.5-flash-image` (např. na novější preview model, jakmile ho
-   budeš chtít vyzkoušet).
+   Klíč se při čtení vždy ořízne o okolní mezery/nové řádky (běžný artefakt
+   vkládání do Vercel UI, který dřív způsoboval neprůhledné „síťový
+   požadavek selhal" bez jakékoli stopy v External API logu) — přesto ho
+   vlož bez okolního whitespace. Volitelně `GEMINI_IMAGE_MODEL`, pokud
+   chceš přepsat výchozí `gemini-2.5-flash-image` — **pozor, tento model má
+   podle Google plánovaný shutdown 2. 10. 2026**, s `gemini-3.1-flash-image-preview`
+   jako oficiální (zatím "-preview") náhradou; před tímto datem nastav
+   `GEMINI_IMAGE_MODEL` na aktuálně doporučený model.
+   Ujisti se, že Blob store je připojený (bod 9) — bez něj se AFTER obrázek
+   nemá kam uložit.
 3. Po redeploy:
    - `/settings` → **Provider Health** → sekce „AI Renovation Visualization"
-     ukáže `Google Gemini (image-to-image)` jako PŘIPOJENO (nebo CHYBA s
-     posledním bezpečným chybovým hlášením, pokud klíč nefunguje).
+     ukáže jeden ze čtyř stavů: **ČEKÁ NA PŘÍSTUP** (bez klíče), **KLÍČ
+     NASTAVEN, NEOVĚŘENO** (klíč je nastavený, ale ještě neproběhl žádný
+     skutečný požadavek — samotná existence klíče se NIKDY nehlásí jako
+     „připojeno"), **PŘIPOJENO A OVĚŘENO** (poslední reálný požadavek
+     uspěl) nebo **CHYBA** (poslední reálný požadavek selhal — zobrazí se
+     bezpečná zpráva + diagnostický kód, např. `GEMINI_AUTH_FAILED`,
+     `GEMINI_DNS_OR_NETWORK_FAILED`, `GEMINI_MODEL_NOT_AVAILABLE`).
+   - Tlačítko **„Otestovat připojení"** u Gemini providera pošle jeden
+     skutečný, minimální požadavek na stejný endpoint/model jako produkční
+     generování (1×1 pixel testovací obrázek) a ukáže reálný výsledek —
+     nikdy fingovaný.
    - Na detailu nemovitosti, u libovolné fotografie s vyplněným
      rekonstrukčním plánem (`RenovationPlan`), tlačítko „Vygenerovat"
      skutečně upraví PŮVODNÍ fotografii podle plánu (image-to-image edit,
-     ne generování nové místnosti) a zobrazí ji vedle originálu jako
+     ne generování nové místnosti), výsledek uloží do Vercel Blob (nikdy
+     jako base64 přímo v databázi) a zobrazí ho vedle originálu jako
      „AI VIZUALIZACE".
    - Stejný požadavek (stejná fotka + styl/prompt + stejný rekonstrukční
-     plán) podruhé nespotřebuje další placené volání — použije se
-     existující výsledek z cache.
+     plán) podruhé nespotřebuje další placené volání ani nový Blob upload —
+     použije se existující výsledek z cache.
+   - Každý neúspěšný požadavek se bezpečně loguje na serveru (Vercel
+     Runtime Logs) se strukturovanými poli `provider`, `model`, `stage`,
+     `code`, `httpStatus`, `googleErrorMessage`, `timeout`,
+     `responseContentType`, `cause` — nikdy s API klíčem, hlavičkou
+     Authorization/x-goog-api-key, ani celým base64 obrázkem.
 
 Bez tohoto klíče appka i nadále funguje přesně jako dosud — požadavek na
 vizualizaci se uloží jako `NOT_CONFIGURED`, nikdy se nefingáže hotový

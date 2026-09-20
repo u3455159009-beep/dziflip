@@ -1,4 +1,12 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from "vitest";
+
+// photoGeneration.ts now saves every GENERATED result's real bytes to
+// Vercel Blob (never a base64 data: URI in the database) — @vercel/blob's
+// put() uses its own internal undici fetch, not the global one, so the
+// module itself is mocked here the same way tests/photoUpload.test.ts
+// mocks it, rather than trying to intercept global.fetch.
+vi.mock("@vercel/blob", () => ({ put: vi.fn() }));
+import { put } from "@vercel/blob";
 import { prisma } from "@/lib/prisma";
 import { computeMaxRenovationBudget, computeMaxBuyPrice, computeEconomics, type AssumptionsInput } from "@/lib/calc";
 import { computeRenovationCostBreakdown, computeRenovationBudgetStatus } from "@/lib/renovationBudget";
@@ -25,6 +33,13 @@ async function wipeDb() {
   await prisma.renovationPlan.deleteMany();
   await prisma.assumptions.deleteMany();
   await prisma.project.deleteMany();
+}
+
+const putMock = vi.mocked(put);
+const originalBlobToken = process.env.BLOB_READ_WRITE_TOKEN;
+
+function mockBlobSuccess(url = "https://abc123.public.blob.vercel-storage.com/projects/x/generations/after.png") {
+  putMock.mockResolvedValueOnce({ url, downloadUrl: `${url}?download=1`, pathname: url.split("/").slice(3).join("/"), contentType: "image/png" } as any);
 }
 
 // --- Item 5: MAX RENOVATION BUDGET (Budget First) ---
@@ -342,7 +357,8 @@ describe("Renovation Visualization pipeline (items 4/6/8/15/18)", () => {
     status: "ACTIVE",
     async generate(request) {
       return {
-        generatedUrl: "https://example.test/generated/kitchen-after.jpg",
+        imageBase64: "ZmFrZS1nZW5lcmF0ZWQtaW1hZ2U=",
+        mimeType: "image/jpeg",
         model: "test-model-v1",
         changeDetection: ["PODLAHA", "KUCHYNSKA_LINKA", "SVETLA"],
         structuralChange: request.prompt?.includes("bourat") ?? false,
@@ -354,11 +370,13 @@ describe("Renovation Visualization pipeline (items 4/6/8/15/18)", () => {
 
   beforeAll(() => {
     IMAGE_GEN_PROVIDERS.push(mockImageGen);
+    process.env.BLOB_READ_WRITE_TOKEN = "test-token";
   });
   afterAll(async () => {
     await wipeDb();
     const idx = IMAGE_GEN_PROVIDERS.indexOf(mockImageGen);
     if (idx >= 0) IMAGE_GEN_PROVIDERS.splice(idx, 1);
+    process.env.BLOB_READ_WRITE_TOKEN = originalBlobToken;
   });
 
   it("passes the project's shared RenovationPlan as design-system context so rooms stay visually consistent", async () => {
@@ -370,6 +388,7 @@ describe("Renovation Visualization pipeline (items 4/6/8/15/18)", () => {
       data: { projectId: project.id, url: "https://example.test/kitchen.jpg", sortOrder: 0, roomType: "KUCHYN" }
     });
 
+    mockBlobSuccess();
     const generation = await requestPhotoGeneration(photo.id, "MODERNI", null);
     expect(generation.status).toBe("GENERATED");
     expect(generation.renovationPlanId).not.toBeNull();
@@ -379,6 +398,7 @@ describe("Renovation Visualization pipeline (items 4/6/8/15/18)", () => {
     const project = await prisma.project.create({ data: { title: "Structural test" } });
     const photo = await prisma.photo.create({ data: { projectId: project.id, url: "https://example.test/livingroom.jpg", sortOrder: 0 } });
 
+    mockBlobSuccess();
     const generation = await requestPhotoGeneration(photo.id, "MODERNI", "otevřít dispozici, bourat příčku");
     expect(generation.structuralChange).toBe(true);
     expect(generation.structuralChangeNote).toMatch(/příčky/);
@@ -391,6 +411,7 @@ describe("Renovation Visualization pipeline (items 4/6/8/15/18)", () => {
       data: { projectId: project.id, url: "https://example.test/kitchen2.jpg", sortOrder: 0, roomType: "KUCHYN" }
     });
 
+    mockBlobSuccess();
     const generation = await requestPhotoGeneration(photo.id, "MODERNI", null);
     expect(generation.status).toBe("GENERATED");
 
@@ -442,7 +463,8 @@ describe("Change Detection -> shopping selection -> economics recompute (item 17
     status: "ACTIVE",
     async generate() {
       return {
-        generatedUrl: "https://example.test/generated/after.jpg",
+        imageBase64: "ZmFrZS1nZW5lcmF0ZWQtaW1hZ2U=",
+        mimeType: "image/jpeg",
         model: "test-model-v1",
         changeDetection: ["PODLAHA"],
         structuralChange: false,
@@ -454,11 +476,13 @@ describe("Change Detection -> shopping selection -> economics recompute (item 17
 
   beforeAll(() => {
     IMAGE_GEN_PROVIDERS.push(mockImageGen);
+    process.env.BLOB_READ_WRITE_TOKEN = "test-token";
   });
   afterAll(async () => {
     await wipeDb();
     const idx = IMAGE_GEN_PROVIDERS.indexOf(mockImageGen);
     if (idx >= 0) IMAGE_GEN_PROVIDERS.splice(idx, 1);
+    process.env.BLOB_READ_WRITE_TOKEN = originalBlobToken;
   });
 
   it("selecting a product for a visualization-derived requirement recomputes renovation cost, MAX BUY PRICE, profit and ROI", async () => {
@@ -488,6 +512,7 @@ describe("Change Detection -> shopping selection -> economics recompute (item 17
     const beforeAssumptions = await prisma.assumptions.findUniqueOrThrow({ where: { projectId: project.id } });
     const beforeMaxBuy = computeMaxBuyPrice(beforeAssumptions as unknown as AssumptionsInput);
 
+    mockBlobSuccess();
     const generation = await requestPhotoGeneration(photo.id, "MODERNI", null);
     const requirement = await prisma.productRequirement.findFirstOrThrow({ where: { sourcePhotoGenerationId: generation.id } });
     const product = await prisma.product.create({

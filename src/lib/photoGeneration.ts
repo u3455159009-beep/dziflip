@@ -7,12 +7,55 @@
 // Cache (item 13): before spending a paid API call, checks whether a
 // GENERATED result already exists for the exact same (photo, style,
 // prompt, RenovationPlan, provider) signature and reuses it instead.
+import { put } from "@vercel/blob";
 import { prisma } from "@/lib/prisma";
 import { getActiveImageGenProvider } from "@/lib/imageGen/registry";
 import type { ImageGenRoomAnalysis, RenovationPlanContext } from "@/lib/imageGen/types";
 import { computeRequestSignature } from "@/lib/imageGen/cache";
 import { createRequirementsFromChangeDetection } from "@/lib/productSearch";
+import { isBlobStorageConfigured } from "@/lib/photoUpload";
 import type { ChangeDetectionItem, PhotoGenerationStyle, RoomType } from "@/lib/types";
+
+class BlobSaveError extends Error {
+  code = "BLOB_SAVE_FAILED";
+}
+
+function randomSuffix(): string {
+  return Math.random().toString(36).slice(2, 10);
+}
+
+/**
+ * Uploads a provider's raw generated image bytes to Vercel Blob (item 7 —
+ * the AFTER image is real, persistent object storage, exactly like the
+ * ORIGINAL, never a base64 data: URI stuffed into a database column) and
+ * returns the resulting durable URL. Never touches the ORIGINAL Photo row.
+ * Throws BlobSaveError (code BLOB_SAVE_FAILED) rather than silently
+ * falling back to anything — a successful Gemini call whose result can't
+ * be durably saved is not a successful generation.
+ */
+async function saveGeneratedImageToBlob(
+  photo: { id: string; projectId: string },
+  imageBase64: string,
+  mimeType: string
+): Promise<string> {
+  if (!isBlobStorageConfigured()) {
+    throw new BlobSaveError("Úložiště fotografií (Vercel Blob) není připojeno — chybí proměnná prostředí BLOB_READ_WRITE_TOKEN.");
+  }
+  const extension = mimeType.split("/")[1] === "jpeg" ? "jpg" : mimeType.split("/")[1] || "png";
+  const pathname = `projects/${photo.projectId}/generations/${photo.id}-${Date.now()}-${randomSuffix()}.${extension}`;
+  try {
+    const buffer = Buffer.from(imageBase64, "base64");
+    const blob = await put(pathname, buffer, { access: "public", contentType: mimeType });
+    return blob.url;
+  } catch (err) {
+    console.error("[gemini-image-gen] failed to save AFTER image to Vercel Blob", {
+      stage: "blob_save",
+      code: "BLOB_SAVE_FAILED",
+      reason: err instanceof Error ? err.message.slice(0, 200) : "unknown"
+    });
+    throw new BlobSaveError(`Uložení vygenerovaného obrázku do úložiště selhalo${err instanceof Error && err.message ? `: ${err.message}` : "."}`);
+  }
+}
 
 function toPlanContext(plan: {
   style: string | null;
@@ -109,11 +152,15 @@ export async function requestPhotoGeneration(photoId: string, style: PhotoGenera
   });
   try {
     const result = await provider.generate({ photoUrl: photo.url, style, prompt, roomType, planContext, roomAnalysis });
+    // A successful Gemini call whose image can't be durably saved is not a
+    // successful generation (item 7) — this throws BlobSaveError, caught
+    // below like any other failure, before any GENERATED row is written.
+    const afterUrl = await saveGeneratedImageToBlob({ id: photo.id, projectId: photo.projectId }, result.imageBase64, result.mimeType);
     const generated = await prisma.photoGeneration.update({
       where: { id: pending.id },
       data: {
         status: "GENERATED",
-        generatedUrl: result.generatedUrl,
+        generatedUrl: afterUrl,
         model: result.model,
         generatedAt: new Date(),
         changeDetection: JSON.stringify(result.changeDetection),
@@ -135,12 +182,17 @@ export async function requestPhotoGeneration(photoId: string, style: PhotoGenera
   } catch (err) {
     // Never crash, never fabricate a result as a fallback — the original
     // Photo row is untouched; only this generation attempt is marked
-    // FAILED with a safe, human-readable reason (never the API key).
+    // FAILED with a safe, human-readable reason (never the API key) and a
+    // machine-readable diagnostic code (item 3), so a real failure — auth,
+    // network/DNS, timeout, rate limit, bad request, unavailable model,
+    // an invalid response, a failed ORIGINAL download, or a failed Blob
+    // save — is never reported as an undifferentiated generic error.
     const message = err instanceof Error ? err.message : "Vizualizaci se nepodařilo vygenerovat.";
+    const code = typeof (err as any)?.code === "string" ? (err as any).code : "GEMINI_RESPONSE_INVALID";
     await logProviderFailure(provider.key, message);
     return prisma.photoGeneration.update({
       where: { id: pending.id },
-      data: { status: "FAILED", failureReason: message }
+      data: { status: "FAILED", failureReason: message, failureCode: code }
     });
   }
 }

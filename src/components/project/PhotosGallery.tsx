@@ -532,6 +532,7 @@ export function PhotosGallery({ projectId, photos: initial }: { projectId: strin
                                 {g.status === "FAILED" && (
                                   <div className="mt-1.5 rounded bg-band-badBg px-2 py-1 text-[10px] text-band-bad">
                                     {g.failureReason || "Generování vizualizace selhalo."} Původní fotografie zůstává beze změny.
+                                    {g.failureCode && <span className="ml-1 font-mono opacity-70">({g.failureCode})</span>}
                                   </div>
                                 )}
                               </li>
