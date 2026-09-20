@@ -9,7 +9,8 @@ import { getSettings } from "@/lib/settings";
 import { getActiveProductProviders, getProductProvider } from "@/lib/products/registry";
 import { ProductNotAvailableError, type ProductCandidate } from "@/lib/products/types";
 import { computeShoppingLine } from "@/lib/productQuantity";
-import type { BudgetCategory, ProductCategory, ShoppingCategory } from "@/lib/types";
+import type { BudgetCategory, ChangeDetectionItem, ProductCategory, RoomType, ShoppingCategory } from "@/lib/types";
+import { CHANGE_DETECTION_ITEM_LABELS } from "@/lib/types";
 
 // A shopping category maps directly onto the (extended) BudgetItem
 // category taxonomy — see BUDGET_CATEGORIES in types.ts. OSVETLENI reuses
@@ -211,6 +212,78 @@ export async function syncBudgetItemForRequirement(requirementId: string) {
     return prisma.budgetItem.update({ where: { id: requirement.budgetItem.id }, data });
   }
   return prisma.budgetItem.create({ data: { ...data, productRequirementId: requirementId } });
+}
+
+// Change Detection → shopping list linkage (item 15) — every changed item a
+// visualization shows must have a corresponding real product requirement in
+// the shopping list, tagged as either "used in the visualization" (exact
+// match, once selected) or "nearest available equivalent" (still linked,
+// but not yet confirmed to be exactly what's shown).
+const CHANGE_ITEM_CATEGORY: Record<ChangeDetectionItem, { category: ProductCategory; shoppingCategory: ShoppingCategory }> = {
+  PODLAHA: { category: "PODLAHY", shoppingCategory: "STAVEBNI_MATERIAL" },
+  MALBA: { category: "BARVY", shoppingCategory: "STAVEBNI_MATERIAL" },
+  LISTY: { category: "LISTY", shoppingCategory: "STAVEBNI_MATERIAL" },
+  DVERE: { category: "DVERE", shoppingCategory: "STAVEBNI_MATERIAL" },
+  KLIKY: { category: "KLIKY", shoppingCategory: "STAVEBNI_MATERIAL" },
+  SVETLA: { category: "SVETLA", shoppingCategory: "OSVETLENI" },
+  KUCHYNSKA_LINKA: { category: "KUCHYNE", shoppingCategory: "KUCHYN" },
+  PRACOVNI_DESKA: { category: "PRACOVNI_DESKY", shoppingCategory: "KUCHYN" },
+  DREZ: { category: "DREZY", shoppingCategory: "KUCHYN" },
+  BATERIE: { category: "VODOVODNI_BATERIE", shoppingCategory: "KOUPELNA" },
+  SPOTREBICE: { category: "SPOTREBICE", shoppingCategory: "SPOTREBICE" },
+  OBKLADY_DLAZBY: { category: "OBKLADY", shoppingCategory: "KOUPELNA" },
+  SANITA: { category: "SANITA", shoppingCategory: "KOUPELNA" },
+  SKRINKY: { category: "SKRINE", shoppingCategory: "NABYTEK" },
+  ZRCADLO: { category: "ZRCADLA", shoppingCategory: "KOUPELNA" },
+  RADIATOR: { category: "OSTATNI", shoppingCategory: "STAVEBNI_MATERIAL" },
+  ZASUVKY: { category: "ZASUVKY", shoppingCategory: "STAVEBNI_MATERIAL" },
+  VYPINACE: { category: "VYPINACE", shoppingCategory: "STAVEBNI_MATERIAL" },
+  NABYTEK: { category: "OSTATNI", shoppingCategory: "NABYTEK" }
+};
+
+/**
+ * Creates one ProductRequirement per changed item a visualization reports
+ * (item 8's Change Detection list), linked back to the PhotoGeneration that
+ * produced it. Skips items a requirement already exists for on this photo
+ * generation, so re-running/refreshing a visualization never duplicates the
+ * shopping list. Every requirement starts NEEDED — no product/price is
+ * invented here, only the real need itself.
+ */
+export async function createRequirementsFromChangeDetection(
+  photoGenerationId: string,
+  changeDetection: ChangeDetectionItem[],
+  room: RoomType | null,
+  projectId: string
+) {
+  const existing = await prisma.productRequirement.findMany({
+    where: { projectId, sourcePhotoGenerationId: photoGenerationId }
+  });
+  const already = new Set(existing.map((r) => r.category));
+
+  const created = [];
+  for (const item of changeDetection) {
+    const mapping = CHANGE_ITEM_CATEGORY[item];
+    if (!mapping || already.has(mapping.category)) continue;
+    const requirement = await prisma.productRequirement.create({
+      data: {
+        projectId,
+        room,
+        category: mapping.category,
+        shoppingCategory: mapping.shoppingCategory,
+        description: `${CHANGE_DETECTION_ITEM_LABELS[item]} — z vizualizace rekonstrukce`,
+        status: "NEEDED",
+        sourcePhotoGenerationId: photoGenerationId,
+        usedInVisualization: false
+      }
+    });
+    created.push(requirement);
+    already.add(mapping.category);
+  }
+  return created;
+}
+
+export async function markUsedInVisualization(requirementId: string, used: boolean) {
+  return prisma.productRequirement.update({ where: { id: requirementId }, data: { usedInVisualization: used } });
 }
 
 export async function selectProduct(productId: string) {

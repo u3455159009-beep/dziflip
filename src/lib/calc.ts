@@ -164,6 +164,42 @@ export function computeMaxBuyPrice(a: AssumptionsInput): number | null {
   return Math.min(pProfit, pMargin, pRoi);
 }
 
+/**
+ * MAX RENOVATION BUDGET (item 5, "Budget First") — the maximum renovation
+ * spend at which, using the CONSERVATIVE sale price and the purchase price
+ * actually used, all three minimum targets (absolute profit, margin, ROI)
+ * are simultaneously satisfied. Mirrors computeMaxBuyPrice's math but
+ * solves for renovationCost instead of purchasePrice — the free variable
+ * every other cost/price in the deal is held fixed while solving.
+ *
+ * Returns null ("nelze vypočítat" / N/A) whenever the purchase price or
+ * conservative sale price isn't known yet — this function is never allowed
+ * to build a plan/visualization/shopping list against a fabricated ceiling.
+ * `override`, when set (Assumptions.maxRenovationBudgetOverride), always
+ * wins — it's the user's explicit manual figure.
+ */
+export function computeMaxRenovationBudget(a: AssumptionsInput, override?: number | null): number | null {
+  if (typeof override === "number" && Number.isFinite(override) && override >= 0) return override;
+
+  const purchasePrice = knownPrice(a.purchasePriceUsed);
+  const sale = knownPrice(a.saleConservative);
+  if (purchasePrice === null || sale === null) return null;
+
+  // Fixed costs other than renovation — the current renovationCost is
+  // excluded because it's the value we're solving for, not a fixed input.
+  const otherFixed = fixedCostsExclPurchase(a) - n(a.renovationCost);
+  const minProfit = n(a.minProfit);
+  const minMargin = n(a.minMarginPct);
+  const minRoi = n(a.minRoiPct);
+
+  const rProfit = sale - purchasePrice - otherFixed - minProfit;
+  const rMargin = sale * (1 - minMargin) - purchasePrice - otherFixed;
+  const rRoi = sale / (1 + minRoi) - purchasePrice - otherFixed;
+
+  const max = Math.min(rProfit, rMargin, rRoi);
+  return max > 0 ? max : 0;
+}
+
 export type FlipBand = "BAD" | "NORMAL" | "GOOD" | "BUY_NOW" | "UNKNOWN";
 
 export const FLIP_BAND_LABELS: Record<FlipBand, string> = {

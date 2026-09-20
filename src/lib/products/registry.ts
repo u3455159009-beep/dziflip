@@ -1,4 +1,5 @@
 import { createPendingProductProvider } from "./pendingProvider";
+import { genericProductSearchProvider } from "./genericSearchProvider";
 import type { ProductProvider } from "./types";
 
 // None of these are connected — see each provider's statusNote for what
@@ -14,7 +15,14 @@ export const bauhausProvider = createPendingProductProvider("BAUHAUS", "Bauhaus"
 export const mallProvider = createPendingProductProvider("MALL", "Mall.cz", REASON);
 export const ikeaProvider = createPendingProductProvider("IKEA", "IKEA", REASON);
 
-export const PRODUCT_PROVIDERS: ProductProvider[] = [hornbachProvider, dekProvider, bauhausProvider, mallProvider, ikeaProvider];
+export const PRODUCT_PROVIDERS: ProductProvider[] = [
+  genericProductSearchProvider,
+  hornbachProvider,
+  dekProvider,
+  bauhausProvider,
+  mallProvider,
+  ikeaProvider
+];
 
 export function getProductProvider(key: string): ProductProvider | undefined {
   return PRODUCT_PROVIDERS.find((p) => p.key === key);

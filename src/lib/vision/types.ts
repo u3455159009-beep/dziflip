@@ -9,6 +9,23 @@ import type { RoomType } from "@/lib/types";
 
 export type PhotoAnalysisConfidence = "HIGH" | "MEDIUM" | "LOW";
 
+// Structured per-element description (item 3 of the Photo Understanding
+// Engine). Each field is null when the provider genuinely can't determine
+// it from the photo — never guessed/invented to fill a gap.
+export interface PhotoElementDetails {
+  floor: string | null;
+  walls: string | null;
+  ceiling: string | null;
+  doors: string | null;
+  windows: string | null;
+  lighting: string | null;
+  radiators: string | null;
+  kitchen: string | null;
+  bathroomFixtures: string | null;
+  furniture: string | null;
+  builtIns: string | null;
+}
+
 export interface PhotoAnalysisResult {
   roomType: RoomType;
   currentCondition: string | null;
@@ -18,6 +35,7 @@ export interface PhotoAnalysisResult {
   replaceNotes: string | null;
   renovationSuggestions: string | null;
   confidence: PhotoAnalysisConfidence;
+  elementDetails: PhotoElementDetails | null;
 }
 
 export class VisionNotAvailableError extends Error {}

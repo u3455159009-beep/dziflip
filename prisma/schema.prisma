@@ -40,7 +40,11 @@ datasource db {
 // DuplicateResolvedStatus: PENDING | CONFIRMED_SAME | CONFIRMED_DIFFERENT
 // ListingEventType: CAPTURED | PRICE_CHANGE | DESCRIPTION_CHANGE | CONDITION_CHANGE | CONTACT_CHANGE | PHOTOS_CHANGED | STATUS_CHANGE
 // CompQualityTier: HIGH | MEDIUM | LOW
-// RoomType: KUCHYN | OBYVACI_POKOJ | LOZNICE | KOUPELNA | WC | CHODBA | BALKON | EXTERIER | NEZNAME
+// RoomType: KUCHYN | OBYVACI_POKOJ | LOZNICE | KOUPELNA | WC | CHODBA | BALKON | TERASA | EXTERIER | SKLEP | GARAZ | NEZNAME
+// RenovationPlan.priceLevel: BUDGET | STANDARD | PREMIUM
+// PhotoGeneration.confidence: HIGH | MEDIUM | LOW
+// Photo.matchConfidence: EXACT_MATCH | HIGH_CONFIDENCE_MATCH | POSSIBLE_MATCH
+// RenovationBudgetStatus: WITHIN_BUDGET | NEAR_LIMIT | OVER_BUDGET | INSUFFICIENT_DATA
 // RoomConditionStatus: KEEP | COSMETIC | REPLACE | FULL_RENOVATION | UNKNOWN
 // DataSourceKind: MANUAL | AI_VISION | PROVIDER
 // PhotoGenerationStatus: NOT_CONFIGURED | PENDING | GENERATED | FAILED
@@ -152,6 +156,13 @@ model Project {
   discoveredListingProvider   String?
   discoveredListingExternalId String?
 
+  // POSSIBLE_MATCH photo staging (items 1/2) — when the Listing Discovery
+  // Engine finds only a POSSIBLE_MATCH candidate, its photos are staged here
+  // (never copied into real Photo rows) until the user explicitly confirms
+  // the candidate really is the same property.
+  discoveredListingCandidatePhotos String? // JSON array of candidate photo URLs, staged only
+  discoveredListingPhotosConfirmed Boolean @default(false)
+
   // JSON map of fieldName -> DataConfidence, stored as string
   fieldMeta   String?
   // JSON map of fieldName -> human-readable source label (e.g. "Sreality.cz", "ruční zadání", "AI Vision")
@@ -189,6 +200,7 @@ model Project {
   productRequirements ProductRequirement[]
   duplicatesAsA       PossibleDuplicate[]  @relation("DuplicateA")
   duplicatesAsB       PossibleDuplicate[]  @relation("DuplicateB")
+  renovationPlan      RenovationPlan?
 
   @@unique([portal, externalId])
 }
@@ -435,9 +447,19 @@ model Photo {
   sortOrder Int      @default(0)
   createdAt DateTime @default(now())
 
+  // Provenance (item 1/2, Listing Photo Discovery) — only ever set when this
+  // photo was copied from a specific matched listing via a real provider or
+  // direct-URL fetch. Never set for a manually-uploaded/pasted photo.
+  sourcePhotoProvider     String? // provider key that supplied this photo, e.g. "WEB_SEARCH", "DIRECT_URL" — null for manual uploads
+  sourceListingProvider   String? // matched-listing provider key, e.g. "FLATSCAN" — from Listing Discovery, may differ from sourcePhotoProvider
+  sourceListingExternalId String? // matched listing's external id, when known
+  sourceListingUrl        String? // the exact listing URL this photo was copied from
+  matchConfidence         String? // EXACT_MATCH | HIGH_CONFIDENCE_MATCH | POSSIBLE_MATCH — confidence of the listing match at copy time
+  retrievedAt              DateTime? // when this photo URL was actually fetched/copied — null for manual uploads
+
   // AI Photo Analysis (Vision provider architecture) — fillable manually
   // today, by a real Vision provider later; analysisSource always says which.
-  roomType              String? // KUCHYN | OBYVACI_POKOJ | LOZNICE | KOUPELNA | WC | CHODBA | BALKON | EXTERIER | NEZNAME
+  roomType              String? // KUCHYN | OBYVACI_POKOJ | LOZNICE | KOUPELNA | WC | CHODBA | BALKON | TERASA | EXTERIER | SKLEP | GARAZ | NEZNAME
   currentCondition      String?
   visibleIssues         String? // JSON array of strings
   keepNotes             String?
@@ -447,6 +469,13 @@ model Photo {
   analysisConfidence    String? // HIGH | MEDIUM | LOW | UNKNOWN
   analysisSource        String    @default("MANUAL") // MANUAL | AI_VISION
   analyzedAt            DateTime?
+
+  // Structured per-element description (item 3) — JSON object with keys
+  // floor/walls/ceiling/doors/windows/lighting/radiators/kitchen/
+  // bathroomFixtures/furniture/builtIns, each a short string or null when
+  // not determinable from the photo. Only ever populated by a real Vision
+  // provider analysis — never invented.
+  elementDetails String?
 
   generations PhotoGeneration[]
 }
@@ -462,6 +491,64 @@ model PhotoGeneration {
   status       String    @default("NOT_CONFIGURED") // NOT_CONFIGURED | PENDING | GENERATED | FAILED
   createdAt    DateTime  @default(now())
   generatedAt  DateTime?
+
+  // Renovation Visualization (items 4/6/8/18) — links this generation to the
+  // project's shared design system so all rooms stay visually consistent.
+  renovationPlanId String?
+  renovationPlan   RenovationPlan? @relation(fields: [renovationPlanId], references: [id], onDelete: SetNull)
+
+  // Change Detection (item 8) — JSON array of changed-item labels, e.g.
+  // ["podlaha", "obklady", "svetla"], derived from the same plan that
+  // generated the visualization. Never invented independently of the plan.
+  changeDetection String?
+
+  // Structural-change disclosure (item 6/18) — set true only when the
+  // renovation plan behind this visualization assumes a structural change
+  // (e.g. removing a wall) for this room; structuralChangeNote carries the
+  // human-readable Czech warning shown in the UI.
+  structuralChange     Boolean @default(false)
+  structuralChangeNote String?
+  requiresTechnicalReview Boolean @default(false) // item 18 — "Vyžaduje technické ověření"
+
+  // Estimated cost to realize this room's visualized changes (item 7),
+  // summed from linked ProductRequirement/BudgetItem lines — null until
+  // those are linked and priced.
+  estimatedRoomCost Float?
+
+  confidence String? // HIGH | MEDIUM | LOW — how faithfully the visualization preserves the original photo's geometry
+}
+
+// Shared Renovation Design System (item 4) — exactly one per project, so
+// every room's visualization draws from the same flooring/colors/fixtures
+// instead of independently invented styles. Fields are free text describing
+// the chosen product/style per element; left null until the user (or a
+// value-engineering step) sets them.
+model RenovationPlan {
+  id        String   @id @default(cuid())
+  projectId String   @unique
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  style      String? // e.g. "moderní minimalismus", "skandinávský styl"
+  priceLevel String? // BUDGET | STANDARD | PREMIUM — overall target price tier
+
+  flooring        String?
+  wallColor       String?
+  doors           String?
+  handles         String?
+  outletsSwitches String?
+  lighting        String?
+  kitchen         String?
+  bathroomFixtures String?
+  tiles           String?
+  sanitary        String?
+  builtIns        String?
+
+  notes String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  generations PhotoGeneration[]
 }
 
 model Comparable {
@@ -541,6 +628,12 @@ model BudgetItem {
   unitPrice        Float?
   laborEstimate    Float?
   materialEstimate Float?
+  // Cost breakdown additions (item 11) — additive-only, so existing budget
+  // lines are unaffected. Combined with materialEstimate/laborEstimate and
+  // productRequirementId presence to derive the MATERIAL/PRODUCT/LABOUR/
+  // DELIVERY/WASTE breakdown at aggregation time (see renovationBudget.ts).
+  deliveryEstimate Float? // ESTIMATED — doprava/dovoz, only when a credible methodology set it
+  wasteEstimate    Float? // ESTIMATED — prořez/odpad, only when a credible methodology set it
   total            Float?
   priceSource      String    @default("ESTIMATE")
   productUrl       String?
@@ -624,6 +717,12 @@ model ProductRequirement {
   reservePct       Float    @default(0.1) // waste/reserve buffer applied on top of quantityNeeded
   status           String   @default("NEEDED") // NEEDED | SELECTED | TO_BUY | ORDERED | BOUGHT | PICKED_UP | INSTALLED
   createdAt        DateTime @default(now())
+
+  // Visualization linkage (item 15) — set only when this requirement was
+  // generated/derived from a specific AI renovation visualization's change
+  // detection, so the shopping list stays tied to what was actually shown.
+  sourcePhotoGenerationId String?
+  usedInVisualization     Boolean @default(false) // true = "Použito ve vizualizaci"; false but linked = "nejbližší dostupný ekvivalent"
 
   products   Product[]
   budgetItem BudgetItem?
@@ -723,6 +822,12 @@ model Assumptions {
   minProfit    Float?
   minMarginPct Float? // 0-1
   minRoiPct    Float? // 0-1
+
+  // Budget First (item 5) — manual override for MAX RENOVATION BUDGET. When
+  // null, the app computes it live from purchase price / expected sale /
+  // costs / reserve / minimum profit (see computeMaxRenovationBudget in
+  // calc.ts) rather than storing a stale snapshot.
+  maxRenovationBudgetOverride Float?
 
   incomeTaxPct Float? // 0-1, optional, default 0
 

@@ -29,7 +29,8 @@ export const PROJECT_INCLUDE = {
     }
   },
   duplicatesAsA: { include: { projectB: { select: { id: true, title: true, municipality: true, district: true, askingPrice: true, isDemo: true } } } },
-  duplicatesAsB: { include: { projectA: { select: { id: true, title: true, municipality: true, district: true, askingPrice: true, isDemo: true } } } }
+  duplicatesAsB: { include: { projectA: { select: { id: true, title: true, municipality: true, district: true, askingPrice: true, isDemo: true } } } },
+  renovationPlan: true
 };
 
 export function getProjectWithRelations(id: string) {

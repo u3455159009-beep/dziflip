@@ -498,7 +498,10 @@ export const ROOM_TYPES = [
   "WC",
   "CHODBA",
   "BALKON",
+  "TERASA",
   "EXTERIER",
+  "SKLEP",
+  "GARAZ",
   "NEZNAME"
 ] as const;
 export type RoomType = (typeof ROOM_TYPES)[number];
@@ -511,7 +514,10 @@ export const ROOM_TYPE_LABELS: Record<RoomType, string> = {
   WC: "WC",
   CHODBA: "Chodba",
   BALKON: "Balkon",
+  TERASA: "Terasa",
   EXTERIER: "Exteriér",
+  SKLEP: "Sklep",
+  GARAZ: "Garáž",
   NEZNAME: "Neznámé"
 };
 
@@ -667,6 +673,15 @@ export const PRODUCT_CATEGORIES = [
   "ZRCADLA",
   "ZAVESY",
   "DEKORACE",
+  // Gap-filling for the complete shopping engine (item 9) — additive only.
+  "PODLOZKA",
+  "PRECHODOVY_PROFIL",
+  "PENETRACE",
+  "VYROVNAVACI_HMOTA",
+  "ZARUBNE",
+  "HYDROIZOLACE",
+  "DIGESTOR",
+  "UCHYTKY",
   "OSTATNI"
 ] as const;
 export type ProductCategory = (typeof PRODUCT_CATEGORIES)[number];
@@ -705,6 +720,14 @@ export const PRODUCT_CATEGORY_LABELS: Record<ProductCategory, string> = {
   ZRCADLA: "Zrcadla",
   ZAVESY: "Závěsy",
   DEKORACE: "Dekorace",
+  PODLOZKA: "Podložka pod podlahu",
+  PRECHODOVY_PROFIL: "Přechodový profil",
+  PENETRACE: "Penetrace",
+  VYROVNAVACI_HMOTA: "Vyrovnávací hmota",
+  ZARUBNE: "Zárubně",
+  HYDROIZOLACE: "Hydroizolace",
+  DIGESTOR: "Digestoř",
+  UCHYTKY: "Úchytky (nábytek)",
   OSTATNI: "Ostatní"
 };
 
@@ -732,3 +755,78 @@ export type ProductSource = (typeof PRODUCT_SOURCES)[number];
 
 export const PRODUCT_STATUSES = ["CANDIDATE", "UNAVAILABLE"] as const;
 export type ProductStatus = (typeof PRODUCT_STATUSES)[number];
+
+// --- Phase 6: Listing Photo Discovery + AI Renovation Visualization + Shopping Engine ---
+
+// Renovation Dashboard status (item 16) — computed live, never stored.
+export const RENOVATION_BUDGET_STATUSES = ["WITHIN_BUDGET", "NEAR_LIMIT", "OVER_BUDGET", "INSUFFICIENT_DATA"] as const;
+export type RenovationBudgetStatus = (typeof RENOVATION_BUDGET_STATUSES)[number];
+
+export const RENOVATION_BUDGET_STATUS_LABELS: Record<RenovationBudgetStatus, string> = {
+  WITHIN_BUDGET: "V rozpočtu",
+  NEAR_LIMIT: "Blízko limitu",
+  OVER_BUDGET: "Překročen rozpočet",
+  INSUFFICIENT_DATA: "Nedostatek dat"
+};
+
+// Cost breakdown categories (item 11/13) — derived at aggregation time from
+// BudgetItem fields, never a stored enum on the row itself.
+export const RENOVATION_COST_TYPES = ["MATERIAL", "PRODUCT", "LABOUR", "DELIVERY", "WASTE", "RESERVE"] as const;
+export type RenovationCostType = (typeof RENOVATION_COST_TYPES)[number];
+
+export const RENOVATION_COST_TYPE_LABELS: Record<RenovationCostType, string> = {
+  MATERIAL: "Materiál",
+  PRODUCT: "Produkty",
+  LABOUR: "Práce",
+  DELIVERY: "Doprava",
+  WASTE: "Odpad / prořez",
+  RESERVE: "Rezerva"
+};
+
+// Change Detection vocabulary (item 8) — the fixed list of item kinds a
+// visualization's change-detection may reference. Each is matched against
+// the shared RenovationPlan / shopping list where possible (item 15).
+export const CHANGE_DETECTION_ITEMS = [
+  "PODLAHA",
+  "MALBA",
+  "LISTY",
+  "DVERE",
+  "KLIKY",
+  "SVETLA",
+  "KUCHYNSKA_LINKA",
+  "PRACOVNI_DESKA",
+  "DREZ",
+  "BATERIE",
+  "SPOTREBICE",
+  "OBKLADY_DLAZBY",
+  "SANITA",
+  "SKRINKY",
+  "ZRCADLO",
+  "RADIATOR",
+  "ZASUVKY",
+  "VYPINACE",
+  "NABYTEK"
+] as const;
+export type ChangeDetectionItem = (typeof CHANGE_DETECTION_ITEMS)[number];
+
+export const CHANGE_DETECTION_ITEM_LABELS: Record<ChangeDetectionItem, string> = {
+  PODLAHA: "Podlaha",
+  MALBA: "Malba / barva stěn",
+  LISTY: "Lišty",
+  DVERE: "Dveře",
+  KLIKY: "Kliky",
+  SVETLA: "Světla",
+  KUCHYNSKA_LINKA: "Kuchyňská linka",
+  PRACOVNI_DESKA: "Pracovní deska",
+  DREZ: "Dřez",
+  BATERIE: "Baterie",
+  SPOTREBICE: "Spotřebiče",
+  OBKLADY_DLAZBY: "Obklady / dlažby",
+  SANITA: "Sanita",
+  SKRINKY: "Skříňky",
+  ZRCADLO: "Zrcadlo",
+  RADIATOR: "Radiátor",
+  ZASUVKY: "Zásuvky",
+  VYPINACE: "Vypínače",
+  NABYTEK: "Nábytek"
+};

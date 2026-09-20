@@ -177,8 +177,8 @@ export async function POST(req: NextRequest) {
       areaM2: extracted.fields.areaM2 ?? null,
       askingPrice: extracted.fields.askingPrice ?? null
     })
-      .then((match) =>
-        prisma.project.update({
+      .then(async (match) => {
+        await prisma.project.update({
           where: { id: project.id },
           data: {
             discoveredListingUrl: match.url,
@@ -187,8 +187,41 @@ export async function POST(req: NextRequest) {
             discoveredListingProvider: match.matchProviderKey,
             discoveredListingExternalId: match.matchExternalId
           }
-        })
-      )
+        });
+
+        // Listing Photo Discovery (items 1/2) — photos are only ever copied
+        // automatically from a match confident enough to trust it's the
+        // same property (EXACT_MATCH/HIGH_CONFIDENCE_MATCH). A POSSIBLE_MATCH
+        // stages its candidate photos for explicit user confirmation instead
+        // — never auto-attached. NOT_FOUND or a matched provider supplying
+        // no photos leaves the project with no photos and no fabrication.
+        if (match.photos.length > 0) {
+          if (match.confidence === "EXACT_MATCH" || match.confidence === "HIGH_CONFIDENCE_MATCH") {
+            const now = new Date();
+            await prisma.photo.createMany({
+              data: match.photos.map((u, i) => ({
+                projectId: project.id,
+                url: u,
+                sortOrder: i,
+                sourcePhotoProvider: match.matchProviderKey,
+                sourceListingProvider: match.matchProviderKey,
+                sourceListingExternalId: match.matchExternalId,
+                sourceListingUrl: match.url,
+                matchConfidence: match.confidence,
+                retrievedAt: now
+              }))
+            });
+          } else if (match.confidence === "POSSIBLE_MATCH") {
+            await prisma.project.update({
+              where: { id: project.id },
+              data: {
+                discoveredListingCandidatePhotos: JSON.stringify(match.photos),
+                discoveredListingPhotosConfirmed: false
+              }
+            });
+          }
+        }
+      })
       .catch(() => {});
   }
 

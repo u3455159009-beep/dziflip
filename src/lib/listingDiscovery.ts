@@ -113,6 +113,10 @@ export interface DiscoveryResult {
    * listing id) without this module knowing about any specific provider. */
   matchProviderKey: string | null;
   matchExternalId: string | null;
+  /** Candidate's own photo URLs (item 1/2) — only ever populated from the
+   * matched listing's real source data, never invented. Empty when the
+   * matched provider genuinely doesn't supply photos. */
+  photos: string[];
 }
 
 const CONFIDENCE_RANK: Record<ListingMatchConfidence, number> = {
@@ -142,7 +146,8 @@ export async function discoverOriginalListing(subject: ListingMatchSubject): Pro
       providersTried,
       note: "Žádný aktivní zdroj pro vyhledání původního inzerátu není připojen (viz Nastavení → Provider Health).",
       matchProviderKey: null,
-      matchExternalId: null
+      matchExternalId: null,
+      photos: []
     };
   }
 
@@ -183,7 +188,8 @@ export async function discoverOriginalListing(subject: ListingMatchSubject): Pro
       providersTried,
       note: `Prohledáno ${providersTried.length} aktivních zdrojů, žádná dostatečně jistá shoda nenalezena.`,
       matchProviderKey: null,
-      matchExternalId: null
+      matchExternalId: null,
+      photos: []
     };
   }
 
@@ -195,6 +201,7 @@ export async function discoverOriginalListing(subject: ListingMatchSubject): Pro
     providersTried,
     note: `Nalezeno přes ${best.candidate.portal}.`,
     matchProviderKey: best.providerKey,
-    matchExternalId: best.candidate.externalId
+    matchExternalId: best.candidate.externalId,
+    photos: best.candidate.photos ?? []
   };
 }

@@ -41,6 +41,7 @@ export async function analyzePhotoWithAi(photoId: string) {
       renovationSuggestions: result.renovationSuggestions,
       analysisConfidence: result.confidence,
       analysisSource: "AI_VISION",
+      elementDetails: result.elementDetails ? JSON.stringify(result.elementDetails) : null,
       analyzedAt: new Date()
     }
   });

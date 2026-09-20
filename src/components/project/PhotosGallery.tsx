@@ -2,7 +2,17 @@
 
 import { useEffect, useState } from "react";
 import { Button, Card, Input, SectionTitle } from "@/components/ui";
-import { ROOM_TYPES, ROOM_TYPE_LABELS, PHOTO_GENERATION_STYLES, PHOTO_GENERATION_STYLE_LABELS, type RoomType, type PhotoGenerationStyle } from "@/lib/types";
+import {
+  ROOM_TYPES,
+  ROOM_TYPE_LABELS,
+  PHOTO_GENERATION_STYLES,
+  PHOTO_GENERATION_STYLE_LABELS,
+  CHANGE_DETECTION_ITEM_LABELS,
+  type RoomType,
+  type PhotoGenerationStyle,
+  type ChangeDetectionItem
+} from "@/lib/types";
+import { formatCZK } from "@/lib/format";
 import type { PhotoDTO } from "@/lib/project-types";
 
 const ROOMS = [
@@ -191,6 +201,14 @@ export function PhotosGallery({ projectId, photos: initial }: { projectId: strin
                       AI Vision
                     </span>
                   )}
+                  {photo.sourceListingUrl && (
+                    <span
+                      className="absolute right-2 top-2 rounded-full bg-ink/80 px-2 py-0.5 text-[9px] font-medium text-white"
+                      title={`Zkopírováno z nalezeného inzerátu (${photo.matchConfidence ?? "?"})`}
+                    >
+                      z inzerátu
+                    </span>
+                  )}
                 </div>
                 <div className="space-y-2 p-3">
                   <select
@@ -321,12 +339,53 @@ export function PhotosGallery({ projectId, photos: initial }: { projectId: strin
                         </Button>
 
                         {photo.generations.length > 0 && (
-                          <ul className="mt-2 space-y-1">
+                          <ul className="mt-2 space-y-2">
                             {photo.generations.map((g) => (
-                              <li key={g.id} className="rounded bg-card px-2 py-1 text-[11px]">
-                                <span className="font-medium">{PHOTO_GENERATION_STYLE_LABELS[g.style as PhotoGenerationStyle] ?? g.style}</span>
-                                {" — "}
-                                <GenerationStatus status={g.status} />
+                              <li key={g.id} className="rounded bg-card p-2 text-[11px]">
+                                <div>
+                                  <span className="font-medium">{PHOTO_GENERATION_STYLE_LABELS[g.style as PhotoGenerationStyle] ?? g.style}</span>
+                                  {" — "}
+                                  <GenerationStatus status={g.status} />
+                                </div>
+
+                                {g.status === "GENERATED" && g.generatedUrl && (
+                                  <div className="mt-1.5 space-y-1.5">
+                                    <div className="grid grid-cols-2 gap-1.5">
+                                      <div>
+                                        <div className="mb-0.5 text-[9px] uppercase text-muted">Původní</div>
+                                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                                        <img src={photo.url} alt="Původní fotografie" className="aspect-[4/3] w-full rounded object-cover" />
+                                      </div>
+                                      <div>
+                                        <div className="mb-0.5 text-[9px] uppercase text-muted">AI VIZUALIZACE</div>
+                                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                                        <img src={g.generatedUrl} alt="AI vizualizace po rekonstrukci" className="aspect-[4/3] w-full rounded object-cover" />
+                                      </div>
+                                    </div>
+
+                                    <div className="flex flex-wrap items-center gap-1 text-[10px] text-muted">
+                                      {g.confidence && <span>jistota: {CONFIDENCE_LABELS[g.confidence] ?? g.confidence}</span>}
+                                      {g.estimatedRoomCost != null && <span>· odhad nákladů místnosti: {formatCZK(g.estimatedRoomCost)}</span>}
+                                    </div>
+
+                                    {g.changeDetection && (
+                                      <div className="flex flex-wrap gap-1">
+                                        {safeParseArray(g.changeDetection).map((item) => (
+                                          <span key={item} className="rounded-full bg-beige-100 px-2 py-0.5 text-[9px] text-ink">
+                                            {CHANGE_DETECTION_ITEM_LABELS[item as ChangeDetectionItem] ?? item}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    )}
+
+                                    {g.structuralChange && (
+                                      <div className="rounded bg-band-warn/10 px-2 py-1 text-[10px] text-band-warn">
+                                        ⚠ {g.structuralChangeNote || "Vizualizace předpokládá stavební zásah (např. odstranění příčky)."}
+                                        {g.requiresTechnicalReview && " Vyžaduje technické ověření."}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
                               </li>
                             ))}
                           </ul>

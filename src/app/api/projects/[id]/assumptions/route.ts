@@ -16,7 +16,8 @@ const NUMERIC_FIELDS = [
   "minMarginPct",
   "minRoiPct",
   "incomeTaxPct",
-  "bandWidthPct"
+  "bandWidthPct",
+  "maxRenovationBudgetOverride"
 ];
 
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {

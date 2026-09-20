@@ -8,6 +8,13 @@ export interface PhotoGenerationDTO {
   status: string;
   createdAt: string;
   generatedAt: string | null;
+  renovationPlanId: string | null;
+  changeDetection: string | null;
+  structuralChange: boolean;
+  structuralChangeNote: string | null;
+  requiresTechnicalReview: boolean;
+  estimatedRoomCost: number | null;
+  confidence: string | null;
 }
 
 export interface PhotoDTO {
@@ -18,6 +25,12 @@ export interface PhotoDTO {
   notes: string | null;
   sortOrder: number;
   createdAt: string;
+  sourcePhotoProvider: string | null;
+  sourceListingProvider: string | null;
+  sourceListingExternalId: string | null;
+  sourceListingUrl: string | null;
+  matchConfidence: string | null;
+  retrievedAt: string | null;
   roomType: string | null;
   currentCondition: string | null;
   visibleIssues: string | null;
@@ -28,7 +41,29 @@ export interface PhotoDTO {
   analysisConfidence: string | null;
   analysisSource: string;
   analyzedAt: string | null;
+  elementDetails: string | null;
   generations: PhotoGenerationDTO[];
+}
+
+export interface RenovationPlanDTO {
+  id: string;
+  projectId: string;
+  style: string | null;
+  priceLevel: string | null;
+  flooring: string | null;
+  wallColor: string | null;
+  doors: string | null;
+  handles: string | null;
+  outletsSwitches: string | null;
+  lighting: string | null;
+  kitchen: string | null;
+  bathroomFixtures: string | null;
+  tiles: string | null;
+  sanitary: string | null;
+  builtIns: string | null;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface ComparablePriceHistoryDTO {
@@ -166,6 +201,8 @@ export interface ProductRequirementDTO {
   reservePct: number;
   status: string;
   createdAt: string;
+  sourcePhotoGenerationId: string | null;
+  usedInVisualization: boolean;
   products: ProductDTO[];
 }
 
@@ -198,6 +235,8 @@ export interface BudgetItemDTO {
   unitPrice: number | null;
   laborEstimate: number | null;
   materialEstimate: number | null;
+  deliveryEstimate: number | null;
+  wasteEstimate: number | null;
   total: number | null;
   priceSource: string;
   productUrl: string | null;
@@ -226,6 +265,7 @@ export interface AssumptionsDTO {
   minRoiPct: number | null;
   incomeTaxPct: number | null;
   bandWidthPct: number | null;
+  maxRenovationBudgetOverride: number | null;
   updatedAt: string;
 }
 
@@ -351,6 +391,8 @@ export interface ProjectDTO {
   discoveredListingReasons: string | null;
   discoveredListingProvider: string | null;
   discoveredListingExternalId: string | null;
+  discoveredListingCandidatePhotos: string | null;
+  discoveredListingPhotosConfirmed: boolean;
   lastComparableDiscoveryAt: string | null;
   comparableDiscoveryNote: string | null;
   externalId: string | null;
@@ -374,6 +416,7 @@ export interface ProjectDTO {
   listingEvents: ListingEventDTO[];
   roomConditions: RoomConditionDTO[];
   productRequirements: ProductRequirementDTO[];
+  renovationPlan: RenovationPlanDTO | null;
   duplicatesAsA: Array<{ id: string; matchScore: number; classification: string; reasons: string; resolvedStatus: string; createdAt: string; resolvedAt: string | null; projectB: PossibleDuplicateDTO["otherProject"] }>;
   duplicatesAsB: Array<{ id: string; matchScore: number; classification: string; reasons: string; resolvedStatus: string; createdAt: string; resolvedAt: string | null; projectA: PossibleDuplicateDTO["otherProject"] }>;
 }

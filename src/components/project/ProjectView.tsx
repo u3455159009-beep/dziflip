@@ -1,6 +1,6 @@
 "use client";
 
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import Link from "next/link";
 import { Card, Select } from "@/components/ui";
@@ -26,6 +26,9 @@ import { InvestmentDashboard } from "./InvestmentDashboard";
 import { AnalysisGapsBanner } from "./AnalysisGapsBanner";
 import { LocalityContextPanel } from "./LocalityContextPanel";
 import { DiscoveredListingHistoryPanel } from "./DiscoveredListingHistoryPanel";
+import { RenovationDashboard } from "./RenovationDashboard";
+import { RenovationPlanPanel } from "./RenovationPlanPanel";
+import { CandidateListingPhotosBanner } from "./CandidateListingPhotosBanner";
 import { computeDataOrigin, DATA_ORIGIN_LABELS } from "@/lib/dataOrigin";
 import { isDataStale } from "@/lib/staleData";
 import { computeDataConfidence } from "@/lib/confidence";
@@ -69,6 +72,7 @@ export function ProjectView({
     renovationCostAssumption: project.assumptions?.renovationCost ?? null
   });
 
+  const router = useRouter();
   const searchParams = useSearchParams();
   const showWarning = searchParams.get("warning") === "1";
   const [status, setStatus] = useState(project.status);
@@ -163,6 +167,16 @@ export function ProjectView({
         <InvestmentDashboard project={project} marketValue={marketValue} arv={arv} dataConfidenceLevel={dataConfidence.level} />
       )}
 
+      {project.discoveredListingCandidatePhotos && (
+        <CandidateListingPhotosBanner
+          projectId={project.id}
+          candidatePhotosJson={project.discoveredListingCandidatePhotos}
+          discoveredListingUrl={project.discoveredListingUrl}
+          confidence={project.discoveredListingConfidence}
+          onResolved={() => router.refresh()}
+        />
+      )}
+
       <LocalityContextPanel projectId={project.id} />
 
       <Card className="flex flex-wrap items-end justify-between gap-4">
@@ -225,6 +239,10 @@ export function ProjectView({
         targetPrice={project.targetPrice}
         assumptions={project.assumptions}
       />
+
+      <RenovationDashboard project={project} />
+
+      <RenovationPlanPanel projectId={project.id} plan={project.renovationPlan} />
 
       <PhotosGallery projectId={project.id} photos={project.photos} />
 
