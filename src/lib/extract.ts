@@ -272,13 +272,34 @@ export function extractFromText(text: string, sourceUrl?: string | null): Extrac
     [/k\s+rekonstrukci/i, "K rekonstrukci"],
     [/velmi\s+dobrý\s+stav/i, "Velmi dobrý stav"],
     [/dobrý\s+stav/i, "Dobrý stav"],
-    [/původní\s+stav/i, "Původní stav"],
+    // Czech declines "původní stav" by case ("v PŮVODNÍM STAVU", "PŮVODNÍHO
+    // STAVU", …) — a literal `/původní\s+stav/i` only ever matches the bare
+    // nominative and silently misses every inflected form actually used in
+    // real listings, leaving condition NEZNÁMÉ even though the text states
+    // it outright. Stem-match both words with CZ_W so any case ending
+    // matches.
+    [new RegExp(`p[ůu]vodn[${CZ_W}]*\\s+stav[${CZ_W}]*`, "i"), "Původní stav"],
     [/špatný\s+stav|havarijní\s+stav/i, "Špatný / havarijní stav"]
   ];
   for (const [re, label] of conditionKeywords) {
     if (re.test(t)) {
       setField(fields, meta, "condition", label, "VERIFIED");
       break;
+    }
+  }
+  // No direct "stav" phrase, but the text explicitly says a core system
+  // (electrics, wiring, the bathroom/kitchen core) is original/unreplaced —
+  // e.g. "elektřina i bytové jádro jsou původní". That is a real, explicit
+  // statement about the property's condition even without the word "stav"
+  // appearing next to it, so it drives condition too — never left NEZNÁMÉ
+  // when the text plainly says the systems haven't been renovated.
+  if (!fields.condition) {
+    const originalSystemsRe = new RegExp(
+      `(?:elektřin[${CZ_W}]*|rozvod[${CZ_W}]*|(?:bytov[${CZ_W}]*\\s+)?jádr[${CZ_W}]*)(?:[^.\\n]{0,25})?\\s+p[ůu]vodn[${CZ_W}]*|p[ůu]vodn[${CZ_W}]*(?:[^.\\n]{0,25})?\\s+(?:elektřin[${CZ_W}]*|rozvod[${CZ_W}]*|jádr[${CZ_W}]*)`,
+      "i"
+    );
+    if (originalSystemsRe.test(t)) {
+      setField(fields, meta, "condition", "Původní stav", "VERIFIED");
     }
   }
 
@@ -342,11 +363,26 @@ export function extractFromText(text: string, sourceUrl?: string | null): Extrac
   // --- Extended renovation-history signals (item 3) — never guessed, only
   // ever set from an explicit textual mention. ---
   if (/klimatizac/i.test(t)) setField(fields, meta, "airConditioning", true, "VERIFIED");
+  const electricsOriginalRe = new RegExp(
+    `elektřin[${CZ_W}]*(?:[^.\\n]{0,25})?\\s+p[ůu]vodn[${CZ_W}]*|p[ůu]vodn[${CZ_W}]*(?:[^.\\n]{0,25})?\\s+elektřin[${CZ_W}]*`,
+    "i"
+  );
   if (/nov[eé]\s+rozvody\s+elektřiny|nov[aá]\s+elektroinstalac/i.test(t)) {
     setField(fields, meta, "electricalRewiring", true, "VERIFIED");
+  } else if (electricsOriginalRe.test(t)) {
+    // Explicit "elektřina je původní" — the wiring has NOT been replaced,
+    // the exact opposite of the true-case above. Same confidence: a
+    // verified reading of the text, not a guess.
+    setField(fields, meta, "electricalRewiring", false, "VERIFIED");
   }
+  const coreOriginalRe = new RegExp(
+    `(?:bytov[${CZ_W}]*\\s+)?jádr[${CZ_W}]*(?:[^.\\n]{0,25})?\\s+p[ůu]vodn[${CZ_W}]*|p[ůu]vodn[${CZ_W}]*(?:[^.\\n]{0,25})?\\s+(?:bytov[${CZ_W}]*\\s+)?jádr[${CZ_W}]*`,
+    "i"
+  );
   if (/zděn[eé]\s+jádro/i.test(t)) setField(fields, meta, "masonryCore", true, "VERIFIED");
-  else if (/(?:panelov|umakartov)[eé]\s+jádro/i.test(t)) setField(fields, meta, "masonryCore", false, "VERIFIED");
+  else if (/(?:panelov|umakartov)[eé]\s+jádro/i.test(t) || coreOriginalRe.test(t)) {
+    setField(fields, meta, "masonryCore", false, "VERIFIED");
+  }
 
   const windowsYear = extractYear(
     t,
@@ -415,7 +451,9 @@ export function extractFromText(text: string, sourceUrl?: string | null): Extrac
     [new RegExp(`garáž[${CZ_W}]*\\s+(?:je\\s+)?(?:zahrnut[${CZ_W}]*|v\\s+ceně)`, "i"), "Garáž zahrnuta v ceně"],
     [new RegExp(`garáž[${CZ_W}]*\\s+není\\s+(?:zahrnut[${CZ_W}]*|v\\s+ceně)`, "i"), "Garáž NENÍ zahrnuta v ceně"],
     [new RegExp(`vlastn[${CZ_W}]*\\s+garáž`, "i"), "Vlastní garáž"],
-    [new RegExp(`sklep[${CZ_W}]*\\s+(?:je\\s+)?(?:zahrnut[${CZ_W}]*|v\\s+ceně)`, "i"), "Sklep zahrnut v ceně"]
+    [new RegExp(`sklep[${CZ_W}]*\\s+(?:je\\s+)?(?:zahrnut[${CZ_W}]*|v\\s+ceně)`, "i"), "Sklep zahrnut v ceně"],
+    [electricsOriginalRe, "Elektřina původní (nutná výměna rozvodů)"],
+    [coreOriginalRe, "Bytové jádro původní (nutná výměna)"]
   ];
   for (const [re, label] of factChecks) {
     if (re.test(t) && !importantFacts.includes(label)) importantFacts.push(label);

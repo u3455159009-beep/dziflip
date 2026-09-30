@@ -198,3 +198,49 @@ měsíční náklady cca 4 000 Kč
     expect(again.fields.district).toBe("Žabovřesky");
   });
 });
+
+// Regression (Request D, item 5): Czech declines "původní stav" by case —
+// "v PŮVODNÍM STAVU" never matched the old literal /původní\s+stav/i regex,
+// leaving condition NEZNÁMÉ even though the text states it outright. This
+// is the exact text that surfaced the bug in production.
+describe("extractFromText — 'Byt je v původním stavu' condition regression (item 5)", () => {
+  const text = "Byt je v původním stavu – elektřina i bytové jádro jsou původní.";
+  const result = extractFromText(text);
+
+  it("sets condition to 'Původní stav' (VERIFIED), never leaves it NEZNÁMÉ/undefined", () => {
+    expect(result.fields.condition).toBe("Původní stav");
+    expect(result.meta.condition).toBe("VERIFIED");
+  });
+
+  it("also recognizes explicit 'elektřina...původní' as electricalRewiring=false", () => {
+    expect(result.fields.electricalRewiring).toBe(false);
+    expect(result.meta.electricalRewiring).toBe("VERIFIED");
+  });
+
+  it("also recognizes explicit 'bytové jádro...původní' as masonryCore=false", () => {
+    expect(result.fields.masonryCore).toBe(false);
+    expect(result.meta.masonryCore).toBe("VERIFIED");
+  });
+
+  it("records both as important facts driving the renovation plan", () => {
+    const facts: string[] = JSON.parse(result.fields.importantFacts!);
+    expect(facts.some((f) => f.includes("Elektřina původní"))).toBe(true);
+    expect(facts.some((f) => f.includes("jádro původní"))).toBe(true);
+  });
+
+  it("still detects condition even without the word 'stav' at all, from 'elektřina...původní' alone", () => {
+    const noStavText = "Prodej bytu 2+1, Brno. Elektřina je původní, bude potřeba vyměnit rozvody.";
+    const r = extractFromText(noStavText);
+    expect(r.fields.condition).toBe("Původní stav");
+  });
+
+  it("condition detection still matches the plain nominative form 'původní stav' (no regression)", () => {
+    const r = extractFromText("Byt 2+kk, původní stav, Praha.");
+    expect(r.fields.condition).toBe("Původní stav");
+  });
+
+  it("a renovated property is never mislabeled by this fix — 'po rekonstrukci' still wins", () => {
+    const r = extractFromText("Byt 2+kk po rekonstrukci, Praha.");
+    expect(r.fields.condition).toBe("Po rekonstrukci");
+  });
+});

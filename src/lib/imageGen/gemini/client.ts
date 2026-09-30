@@ -125,7 +125,47 @@ interface GeminiResponseBody {
     finishReason?: string;
   }>;
   promptFeedback?: { blockReason?: string };
-  error?: { message?: string; status?: string; code?: number };
+  // Google's standard cross-API error model: a 429 carries `details`, an
+  // array of typed objects — a QuotaFailure naming exactly which quota was
+  // hit (e.g. a free-tier per-day limit vs. a paid-tier limit) and/or a
+  // RetryInfo with how long to wait. Present on a genuine quota response;
+  // read defensively since a plain rate-limit response may omit it.
+  error?: {
+    message?: string;
+    status?: string;
+    code?: number;
+    details?: GeminiErrorDetail[];
+  };
+}
+
+interface GeminiErrorDetail {
+  "@type"?: string;
+  violations?: Array<{ quotaMetric?: string; quotaId?: string; quotaValue?: string; description?: string }>;
+  retryDelay?: string;
+}
+
+/**
+ * Pulls the real, Google-provided quota metric name(s) and retry delay out
+ * of a 429 response's `error.details`, when present — never invented, only
+ * ever what Google's own response actually says. Lets the diagnostic
+ * distinguish "this project's free-tier daily/per-minute limit for this
+ * model" from an opaque generic rate limit, which otherwise look identical.
+ */
+function describeQuotaFailure(details: GeminiErrorDetail[] | undefined): string | null {
+  if (!Array.isArray(details)) return null;
+  const parts: string[] = [];
+  for (const d of details) {
+    if (Array.isArray(d?.violations) && d.violations.length > 0) {
+      const metrics = d.violations
+        .map((v) => v.quotaId || v.quotaMetric || v.description)
+        .filter((v): v is string => Boolean(v));
+      if (metrics.length > 0) parts.push(`limit: ${metrics.join(", ")}`);
+    }
+    if (typeof d?.retryDelay === "string" && d.retryDelay) {
+      parts.push(`zkus znovu za: ${d.retryDelay}`);
+    }
+  }
+  return parts.length > 0 ? parts.join("; ") : null;
 }
 
 const SAFETY_FINISH_REASONS = new Set(["SAFETY", "IMAGE_SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII"]);
@@ -251,8 +291,22 @@ async function attemptOnce(input: GeminiEditImageInput, apiKey: string, model: s
     if (!res.ok) {
       const message = body?.error?.message;
       if (res.status === 429) {
-        logGeminiFailure({ stage: "generate_content", model, code: "GEMINI_RATE_LIMITED", httpStatus: res.status, googleErrorMessage: message, responseContentType: contentType });
-        return { status: "RATE_LIMITED", code: "GEMINI_RATE_LIMITED", detail: `${PROVIDER_LABEL}: dosažen rate limit (HTTP 429).` };
+        const quotaDetail = describeQuotaFailure(body?.error?.details);
+        logGeminiFailure({
+          stage: "generate_content",
+          model,
+          code: "GEMINI_RATE_LIMITED",
+          httpStatus: res.status,
+          googleErrorMessage: [message, quotaDetail].filter(Boolean).join(" | "),
+          responseContentType: contentType
+        });
+        return {
+          status: "RATE_LIMITED",
+          code: "GEMINI_RATE_LIMITED",
+          detail: quotaDetail
+            ? `${PROVIDER_LABEL}: dosažen rate limit (HTTP 429) — ${quotaDetail}. Pokud jde o denní/minutový limit FREE TIER, řešením je zapnout billing (platební metodu) v Google AI Studio / Google Cloud pro tento projekt — placený tier má výrazně vyšší limity.`
+            : `${PROVIDER_LABEL}: dosažen rate limit (HTTP 429). Nejčastější příčina je FREE TIER limit (velmi nízký počet požadavků/den pro image modely) — zkontroluj plán/billing v Google AI Studio.`
+        };
       }
       if (res.status === 401 || res.status === 403 || isAuthErrorMessage(message)) {
         logGeminiFailure({ stage: "generate_content", model, code: "GEMINI_AUTH_FAILED", httpStatus: res.status, googleErrorMessage: message, responseContentType: contentType });
@@ -336,8 +390,31 @@ export async function editImageWithGemini(input: GeminiEditImageInput): Promise<
   let last: GeminiImageEditOutcome = { status: "TRANSIENT_ERROR", code: "GEMINI_SERVER_ERROR", detail: `${PROVIDER_LABEL}: neznámá chyba.` };
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     last = await attemptOnce(input, apiKey, model);
-    if (last.status === "OK" || !RETRYABLE_STATUSES.has(last.status)) return last;
+    if (last.status === "OK" || !RETRYABLE_STATUSES.has(last.status)) break;
     if (attempt < MAX_ATTEMPTS) await new Promise((r) => setTimeout(r, 1200));
   }
+  if (last.status === "OK") return last;
+
+  // Optional, operator-configured model fallback (never a hardcoded guess
+  // at a second model id) — tried exactly once, only when the primary
+  // model is unavailable/deprecated or rate-limited, and only when the
+  // operator has actually set a different model to fall back to. A 429 is
+  // often a project-wide quota shared across models, so this isn't
+  // guaranteed to help, but it's a real, bounded, and transparent attempt
+  // rather than silently giving up or guessing a model name of our own.
+  const fallbackModel = process.env.GEMINI_IMAGE_MODEL_FALLBACK?.trim();
+  if (fallbackModel && fallbackModel !== model && (last.code === "GEMINI_MODEL_NOT_AVAILABLE" || last.code === "GEMINI_RATE_LIMITED")) {
+    console.error("[gemini-image-gen] retrying once with GEMINI_IMAGE_MODEL_FALLBACK", {
+      primaryModel: model,
+      fallbackModel,
+      primaryFailureCode: last.code
+    });
+    const fallbackResult = await attemptOnce(input, apiKey, fallbackModel);
+    if (fallbackResult.status === "OK") return fallbackResult;
+    // Keep whichever failure is more informative for the caller — the
+    // fallback's own result, since it's the more recent, final attempt.
+    return fallbackResult;
+  }
+
   return last;
 }

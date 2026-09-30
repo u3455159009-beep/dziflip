@@ -30,6 +30,7 @@ async function createTestProject() {
 
 const originalFetch = global.fetch;
 const originalSearchApiKey = process.env.SEARCH_API_KEY;
+const originalBraveApiKey = process.env.BRAVE_SEARCH_API_KEY;
 
 function mockSearchResults(results: any[]) {
   global.fetch = vi.fn().mockResolvedValue({
@@ -45,6 +46,7 @@ describe("Comparable Discovery Engine (item 4)", () => {
   });
   afterAll(async () => {
     process.env.SEARCH_API_KEY = originalSearchApiKey;
+    process.env.BRAVE_SEARCH_API_KEY = originalBraveApiKey;
     await wipeDb();
   });
 
@@ -77,6 +79,61 @@ describe("Comparable Discovery Engine (item 4)", () => {
 
     const comps = await prisma.comparable.findMany({ where: { projectId: project.id } });
     expect(comps.length).toBe(0);
+  });
+
+  it("a per-provider failure is now actually logged to ProviderErrorLog (item 5 — Provider Health must see real failures, not just a note string)", async () => {
+    process.env.SEARCH_API_KEY = "test-key";
+    global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 500 }) as any;
+    const project = await createTestProject();
+
+    await discoverComparablesForProject(project.id, { force: true });
+
+    const errorLog = await prisma.providerErrorLog.findFirst({ where: { provider: "WEB_SEARCH" } });
+    expect(errorLog).not.toBeNull();
+    expect(errorLog!.errorMessage).toMatch(/500/);
+  });
+
+  it("Request D item 4 — robust fallback: one source provider failing never blocks another source provider's real results from the same run", async () => {
+    process.env.SEARCH_API_KEY = "test-key";
+    process.env.BRAVE_SEARCH_API_KEY = "test-brave-key";
+    const project = await createTestProject();
+
+    // WEB_SEARCH (SEARCH_API_KEY) is down; BRAVE_SEARCH (BRAVE_SEARCH_API_KEY)
+    // is up and returns one real, fully-parseable result. Both are ACTIVE
+    // and queried in the same discovery run.
+    global.fetch = vi.fn(async (url: string) => {
+      if (String(url).includes("api.search.brave.com")) {
+        return {
+          ok: true,
+          json: async () => ({
+            web: {
+              results: [
+                {
+                  title: "Prodej bytu 2+1, 63 m², Brno - Královo Pole, 7 100 000 Kč",
+                  url: "https://www.sreality.cz/detail/prodej/byt/2+1/brno-mesto/123",
+                  description: "Byt 2+1, 63 m², dobrý stav, Brno - Královo Pole."
+                }
+              ]
+            }
+          })
+        };
+      }
+      // WEB_SEARCH's own endpoint — simulated outage.
+      return { ok: false, status: 503 };
+    }) as any;
+
+    const result = await discoverComparablesForProject(project.id, { force: true });
+
+    expect(result.activeProviders).toContain("WEB_SEARCH");
+    expect(result.activeProviders).toContain("BRAVE_SEARCH");
+    expect(result.note).toMatch(/Chyby:/); // WEB_SEARCH's failure is still honestly reported
+    expect(result.createdCount).toBe(1); // but BRAVE_SEARCH's real result still got through
+
+    const comps = await prisma.comparable.findMany({ where: { projectId: project.id } });
+    expect(comps.length).toBe(1);
+    expect(comps[0].sourceProvider).toBe("BRAVE_SEARCH");
+    expect(comps[0].price).toBe(7100000);
+    expect(comps[0].areaM2).toBe(63);
   });
 
   it("real-provider discovery persists comparables with cache metadata, then dedups + records a price drop on re-discovery (scenario N)", async () => {

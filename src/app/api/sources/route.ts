@@ -8,7 +8,7 @@ import { prisma } from "@/lib/prisma";
 import { SOURCE_PROVIDERS } from "@/lib/sources/registry";
 import { getFlatScanMonthlyRequestCount } from "@/lib/sources/flatScan/client";
 
-export type ProviderHealthStatus = "CONNECTED" | "PENDING_ACCESS" | "ERROR" | "DISABLED";
+export type ProviderHealthStatus = "CONNECTED" | "PENDING_ACCESS" | "ERROR" | "DISABLED" | "UNVERIFIED";
 
 const FLATSCAN_MONTHLY_BUDGET = 1000;
 
@@ -47,7 +47,11 @@ export async function GET() {
           getFlatScanMonthlyRequestCount()
         ]);
         const healthStatus: ProviderHealthStatus =
-          lastErr && (!lastOk || lastErr.requestedAt > lastOk.requestedAt) ? "ERROR" : "CONNECTED";
+          !lastOk && !lastErr
+            ? "UNVERIFIED"
+            : lastErr && (!lastOk || lastErr.requestedAt > lastOk.requestedAt)
+              ? "ERROR"
+              : "CONNECTED";
         return {
           key: p.key,
           label: p.label,
@@ -77,9 +81,16 @@ export async function GET() {
       const totalFound = comparableCount + listingCount;
 
       // An ACTIVE provider that has logged an error more recently than its
-      // last real success is reporting trouble, not silently "fine."
+      // last real success is reporting trouble, not silently "fine" — and a
+      // key being configured with neither a real success nor a real error
+      // yet recorded is UNVERIFIED, never claimed CONNECTED on the strength
+      // of its existence alone.
       const healthStatus: ProviderHealthStatus =
-        lastErrorLog && (!lastSuccessAt || lastErrorLog.occurredAt > lastSuccessAt) ? "ERROR" : "CONNECTED";
+        !lastSuccessAt && !lastErrorLog
+          ? "UNVERIFIED"
+          : lastErrorLog && (!lastSuccessAt || lastErrorLog.occurredAt > lastSuccessAt)
+            ? "ERROR"
+            : "CONNECTED";
 
       return {
         key: p.key,

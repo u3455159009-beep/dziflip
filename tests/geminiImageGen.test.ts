@@ -68,6 +68,24 @@ function mockGeminiHttpError(status: number, message: string) {
   };
 }
 
+function mockGeminiQuotaError(quotaId: string, retryDelay?: string) {
+  return {
+    ok: false,
+    status: 429,
+    headers: { get: (): string => "application/json" },
+    json: async () => ({
+      error: {
+        message: "Resource has been exhausted (e.g. check quota).",
+        status: "RESOURCE_EXHAUSTED",
+        details: [
+          { "@type": "type.googleapis.com/google.rpc.QuotaFailure", violations: [{ quotaId, quotaMetric: "generativelanguage.googleapis.com/generate_content_free_tier_requests" }] },
+          ...(retryDelay ? [{ "@type": "type.googleapis.com/google.rpc.RetryInfo", retryDelay }] : [])
+        ]
+      }
+    })
+  };
+}
+
 // Routes based on URL: the photo URL vs. the Gemini generateContent endpoint.
 function makeRouterFetch(geminiResponse: any) {
   return vi.fn(async (url: string) => {
@@ -266,6 +284,21 @@ describe("Gemini image-to-image provider", () => {
 
     const geminiCalls = fetchMock.mock.calls.filter((c: any) => String(c[0]).includes("generativelanguage.googleapis.com"));
     expect(geminiCalls.length).toBe(1);
+  });
+
+  it("9a. a 429 carrying Google's real QuotaFailure/RetryInfo details surfaces the actual quota name and retry delay — never invented, only what Google's own response says", async () => {
+    process.env.IMAGE_GEN_API_KEY = "test-gemini-key";
+    const { photo } = await createProjectWithPlanAndPhoto();
+    global.fetch = makeRouterFetch(mockGeminiQuotaError("generate_content_free_tier_requests_per_day", "19s"));
+
+    const generation = await requestPhotoGeneration(photo.id, "MODERNI", null);
+    expect(generation.status).toBe("FAILED");
+    expect(generation.failureCode).toBe("GEMINI_RATE_LIMITED");
+    expect(generation.failureReason).toMatch(/generate_content_free_tier_requests_per_day/);
+    expect(generation.failureReason).toMatch(/19s/);
+    // Actionable guidance, not just "rate limited" — since this is the
+    // real free-tier quota, the message should point at billing/plan.
+    expect(generation.failureReason).toMatch(/billing|plán/i);
   });
 
   it("9b. HTTP 400 (bad request) is reported as GEMINI_BAD_REQUEST and never retried", async () => {
@@ -562,5 +595,71 @@ describe("Gemini client — key handling", () => {
     expect((outcome as any).code).toBe("GEMINI_AUTH_FAILED");
     expect((outcome as any).detail).toMatch(/neplatné řídicí znaky/i);
     expect(global.fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("Gemini client — optional GEMINI_IMAGE_MODEL_FALLBACK (item 6)", () => {
+  const originalFallback = process.env.GEMINI_IMAGE_MODEL_FALLBACK;
+  const originalModel = process.env.GEMINI_IMAGE_MODEL;
+
+  afterEach(() => {
+    process.env.IMAGE_GEN_API_KEY = originalKey;
+    process.env.GEMINI_IMAGE_MODEL = originalModel;
+    process.env.GEMINI_IMAGE_MODEL_FALLBACK = originalFallback;
+    global.fetch = originalFetch;
+  });
+
+  it("without GEMINI_IMAGE_MODEL_FALLBACK set, a 429 is never retried against a second model — only one real request is made", async () => {
+    process.env.IMAGE_GEN_API_KEY = "test-gemini-key";
+    delete process.env.GEMINI_IMAGE_MODEL_FALLBACK;
+    const fetchMock = vi.fn(async () => mockGeminiHttpError(429, "Quota exceeded"));
+    global.fetch = fetchMock as any;
+
+    const outcome = await editImageWithGemini({ imageBase64: "abc", imageMimeType: "image/jpeg", prompt: "test" });
+    expect(outcome.status).toBe("RATE_LIMITED");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("with GEMINI_IMAGE_MODEL_FALLBACK set and the primary model rate-limited, tries exactly once against the fallback model and succeeds", async () => {
+    process.env.IMAGE_GEN_API_KEY = "test-gemini-key";
+    process.env.GEMINI_IMAGE_MODEL = "gemini-2.5-flash-image";
+    process.env.GEMINI_IMAGE_MODEL_FALLBACK = "gemini-3.1-flash-image-preview";
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).includes("gemini-3.1-flash-image-preview")) return mockGeminiOkResponse();
+      return mockGeminiHttpError(429, "Quota exceeded");
+    });
+    global.fetch = fetchMock as any;
+
+    const outcome = await editImageWithGemini({ imageBase64: "abc", imageMimeType: "image/jpeg", prompt: "test" });
+    expect(outcome.status).toBe("OK");
+    if (outcome.status === "OK") expect(outcome.model).toBe("gemini-3.1-flash-image-preview");
+    // One real call against each model — bounded, never uncontrolled.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("the fallback model is never tried when it's the same as the primary model (no-op guard)", async () => {
+    process.env.IMAGE_GEN_API_KEY = "test-gemini-key";
+    process.env.GEMINI_IMAGE_MODEL = "gemini-2.5-flash-image";
+    process.env.GEMINI_IMAGE_MODEL_FALLBACK = "gemini-2.5-flash-image";
+    const fetchMock = vi.fn(async () => mockGeminiHttpError(429, "Quota exceeded"));
+    global.fetch = fetchMock as any;
+
+    const outcome = await editImageWithGemini({ imageBase64: "abc", imageMimeType: "image/jpeg", prompt: "test" });
+    expect(outcome.status).toBe("RATE_LIMITED");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("the fallback is also tried for GEMINI_MODEL_NOT_AVAILABLE (e.g. a deprecated model id), not just rate limits", async () => {
+    process.env.IMAGE_GEN_API_KEY = "test-gemini-key";
+    process.env.GEMINI_IMAGE_MODEL = "gemini-2.5-flash-image";
+    process.env.GEMINI_IMAGE_MODEL_FALLBACK = "gemini-3.1-flash-image-preview";
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).includes("gemini-3.1-flash-image-preview")) return mockGeminiOkResponse();
+      return mockGeminiHttpError(404, "models/gemini-2.5-flash-image is not found");
+    });
+    global.fetch = fetchMock as any;
+
+    const outcome = await editImageWithGemini({ imageBase64: "abc", imageMimeType: "image/jpeg", prompt: "test" });
+    expect(outcome.status).toBe("OK");
   });
 });

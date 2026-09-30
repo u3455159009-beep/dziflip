@@ -9,7 +9,7 @@ interface ProviderHealthInfo {
   label: string;
   status: "ACTIVE" | "PENDING_ACCESS";
   statusNote: string | null;
-  healthStatus: "CONNECTED" | "PENDING_ACCESS" | "ERROR" | "DISABLED";
+  healthStatus: "CONNECTED" | "PENDING_ACCESS" | "ERROR" | "DISABLED" | "UNVERIFIED";
   lastSuccessAt: string | null;
   totalFound: number;
   lastError: { message: string; occurredAt: string } | null;

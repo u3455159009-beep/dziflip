@@ -103,8 +103,14 @@ export async function discoverComparablesForProject(
       const results = await provider.findComparables!(subjectItem);
       for (const item of results) found.push({ item, providerKey: provider.key });
     } catch (err) {
-      // One provider failing must never abort discovery via the others.
-      errors.push(err instanceof SourceNotAvailableError ? `${provider.label}: ${err.message}` : `${provider.label}: vyhledávání selhalo.`);
+      // One provider failing must never abort discovery via the others —
+      // but it must also never be reported as silently healthy. Logging it
+      // here (not just into the note string below) is what lets Provider
+      // Health (/api/sources) tell a real, repeated failure apart from a
+      // provider that's actually working.
+      const message = err instanceof SourceNotAvailableError ? err.message : "vyhledávání selhalo.";
+      errors.push(`${provider.label}: ${message}`);
+      await prisma.providerErrorLog.create({ data: { provider: provider.key, errorMessage: message } }).catch(() => {});
     }
   }
 

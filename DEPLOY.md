@@ -188,6 +188,45 @@ DziFlip má vlastní, čistě matematický výpočet (Flip Score / MAX BUY PRICE
 FlatScanovo skóre by ho nemělo nijak nahrazovat ani ovlivňovat, takže tento
 endpoint není v integraci vůbec volaný.
 
+### 7.1a Brave Search (doporučeno — FlatScan dva týdny neodpověděl, tohle je reálná, hned dostupná náhrada)
+
+FlatScan na žádost o přístup dva týdny neodpověděl, takže appka na něm nesmí
+být závislá. **Brave Search API** (`src/lib/sources/braveSearchProvider.ts`,
+`src/lib/products/braveProductProvider.ts`, sdílený klient
+`src/lib/braveSearch/client.ts`) je reálná, hned k dispozici — samoobslužné
+založení účtu, žádné čekání na schválení třetí stranou. Není to scraper:
+appka nikdy nestahuje HTML žádného portálu/e-shopu, pouze volá Brave's
+vlastní dokumentované REST API a dotaz omezuje na konkrétní domény přes
+`site:` operátor (realitní portály pro srovnatelné nabídky, české e-shopy
+pro produkty). Reálný text titulku/popisku, který Brave vrátí, appka pak
+proženě STEJNÝM deterministickým parserem (`extractFromText`), jaký se
+používá pro vložený text inzerátu — takže žádný nový, méně prověřený
+parser.
+
+1. Založ si účet na https://brave.com/search/api/ (samoobslužné, vyžaduje
+   platební kartu jako ochranu proti zneužití — v rámci měsíčních
+   kreditů zdarma se nic needeč neúčtuje).
+2. Nastav v proměnných prostředí Vercelu (Production, **Sensitive**):
+   ```
+   BRAVE_SEARCH_API_KEY=<tvůj klíč>
+   ```
+   Jeden klíč aktivuje OBĚ věci najednou — srovnatelné nabídky
+   (`BRAVE_SEARCH` v Comparable Discovery) i reálné produkty pro nákupní
+   seznam (`BRAVE_PRODUCT_SEARCH`).
+3. Po redeploy: `/settings` → **Provider Health** ukáže `Brave Search` jako
+   PŘIPOJENO (nebo ČEKÁ NA PŘÍSTUP bez klíče, nebo CHYBA s bezpečnou
+   chybovou zprávou, pokud klíč nefunguje/došla kvóta).
+
+**Item 4 — robustní fallback mezi zdroji.** Comparable Discovery
+(`src/lib/comparableDiscovery.ts`) už z principu prochází VŠECHNY aktivní
+zdroje (FlatScan, Brave Search, WEB_SEARCH — cokoliv máš zapnuté) v jednom
+běhu a selhání jednoho z nich nikdy nezastaví ostatní — každá chyba se teď
+navíc i loguje do `ProviderErrorLog`, takže Provider Health ukazuje
+skutečný, aktuální stav (ne jen "existuje klíč, tak to určitě funguje").
+FlatScan zůstává plně volitelný — appka na něm není a nikdy nebyla natvrdo
+závislá; pokud/až odpoví a dáš klíč, prostě přibude jako další zdroj v
+tomtéž běhu.
+
 ### 7.2 WEB_SEARCH (obecný, alternativní zdroj)
 
 Kromě FlatScanu je k dispozici i obecný, providerem-neutrální zdroj —
@@ -273,6 +312,40 @@ samo odpoví úspěšně.
 Bez tohoto klíče appka i nadále funguje přesně jako dosud — požadavek na
 vizualizaci se uloží jako `NOT_CONFIGURED`, nikdy se nefingáže hotový
 výsledek.
+
+### 8.1 `GEMINI_RATE_LIMITED` / HTTP 429 v produkci — co to znamená a jak to opravit
+
+Smoke test v produkci vrátil `GEMINI_RATE_LIMITED`. Autentizace (klíč) je
+tedy v pořádku — 429 přijde AŽ PO úspěšném ověření klíče. Podle aktuálních
+(prosinec 2025+) veřejných limitů Googlu je FREE TIER pro obrazové modely
+Gemini extrémně přísný (řádově jednotky až nízké desítky požadavků/den na
+projekt) — jeden testovací požadavek, který okamžitě narazí na 429, je
+mnohem pravděpodobněji FREE TIER limit než skutečné vyčerpání "reálné"
+kvóty z běžného provozu appky.
+
+**Co appka teď dělá jinak:** 429 odpověď od Gemini API nese (pokud ji
+Google do odpovědi zahrne) strukturované `error.details` se skutečným
+názvem vyčerpaného limitu (`QuotaFailure`) a dobou, za kterou to appka může
+zkusit znovu (`RetryInfo.retryDelay`) — appka teď tohle reálné pole parsuje
+a zobrazuje/loguje, místo obecného "rate limit". Uvidíš tak přesně, jestli
+jde o `generate_content_free_tier_requests_per_day` (denní FREE TIER limit)
+nebo jiný typ limitu.
+
+**Řešení:** v Google AI Studio (https://aistudio.google.com/) nebo Google
+Cloud Console zapni pro projekt, kterému `IMAGE_GEN_API_KEY` patří,
+billing (platební metodu) — placený tier má výrazně vyšší limity pro
+obrazové modely. Appka sama nemůže billing zapnout ani nikam volat platbu
+— to je ryze na tvém Google účtu.
+
+**Volitelný model fallback (`GEMINI_IMAGE_MODEL_FALLBACK`).** Pokud chceš,
+appka umí při `GEMINI_RATE_LIMITED` nebo `GEMINI_MODEL_NOT_AVAILABLE`
+zkusit přesně JEDNOU i jiný, tebou zadaný model (nikdy si appka sama žádný
+druhý model id nevymyslí). Protože 429 je často limit na úrovni celého
+projektu (sdílený napříč modely), fallback na jiný model nemusí pomoct —
+ale stojí tě to nanejvýš jeden další reálný požadavek navíc, nikdy víc.
+```
+GEMINI_IMAGE_MODEL_FALLBACK=<jiný model, např. gemini-3.1-flash-image-preview>
+```
 
 ## 9. Photo Upload — Vercel Blob storage (vyžadováno pro tlačítko „+ Přidat")
 

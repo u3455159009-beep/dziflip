@@ -1,5 +1,6 @@
 import { createPendingProductProvider } from "./pendingProvider";
 import { genericProductSearchProvider } from "./genericSearchProvider";
+import { braveProductProvider } from "./braveProductProvider";
 import type { ProductProvider } from "./types";
 
 // None of these are connected — see each provider's statusNote for what
@@ -17,6 +18,7 @@ export const ikeaProvider = createPendingProductProvider("IKEA", "IKEA", REASON)
 
 export const PRODUCT_PROVIDERS: ProductProvider[] = [
   genericProductSearchProvider,
+  braveProductProvider,
   hornbachProvider,
   dekProvider,
   bauhausProvider,
