@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useKeepAwake } from 'expo-keep-awake';
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -39,7 +39,6 @@ type Phase =
   | { kind: 'challenge'; index: number };
 
 export default function Ring() {
-  useKeepAwake('wakeify-ring');
   const t = useTheme();
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ demo?: string; alarmId?: string }>();
@@ -63,11 +62,14 @@ export default function Ring() {
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => true);
     setShowOverLockScreen(true);
+    // Screen stays on while ringing / solving the challenge.
+    const awake = activateKeepAwakeAsync('wakeify-ring').catch(() => {});
     const p = player.current;
     return () => {
       sub.remove();
       setShowOverLockScreen(false);
       p.stop();
+      void awake.then(() => deactivateKeepAwake('wakeify-ring')).catch(() => {});
     };
   }, []);
 
