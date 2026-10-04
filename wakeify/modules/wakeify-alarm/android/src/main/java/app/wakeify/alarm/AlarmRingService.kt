@@ -102,7 +102,8 @@ class AlarmRingService : Service() {
     val resume = persisted != null && isRedelivery && persisted.alarmId == alarmId && persisted.scheduledFor == scheduledFor
     if (isRedelivery && !resume) {
       // The ring was stopped/handled while our process was dead: do not ring again.
-      if (current == null) stopSelfCleanly()
+      // stopSelf(startId) only stops if no newer start command is pending.
+      if (current == null) stopSelf(startId)
       return START_NOT_STICKY
     }
     val startedAt = if (resume) persisted!!.startedAt else System.currentTimeMillis()
@@ -518,7 +519,25 @@ class AlarmRingService : Service() {
      */
     fun stop(context: Context, reason: String, onlyAlarmId: String? = null) {
       val app = context.applicationContext ?: context
+      val task = Runnable { stopOnMain(app, reason, onlyAlarmId) }
+      if (Looper.myLooper() == Looper.getMainLooper()) {
+        task.run()
+        return
+      }
+      // Block the (background) caller briefly so a following getActiveRing() sees the result.
+      val done = java.util.concurrent.CountDownLatch(1)
       mainHandler.post {
+        try {
+          task.run()
+        } finally {
+          done.countDown()
+        }
+      }
+      done.await(2, java.util.concurrent.TimeUnit.SECONDS)
+    }
+
+    private fun stopOnMain(app: Context, reason: String, onlyAlarmId: String?) {
+      run {
         val svc = instance
         val ring = svc?.current
         if (svc != null && ring != null) {
@@ -529,8 +548,11 @@ class AlarmRingService : Service() {
           val persisted = store.getActiveRing()
           if (persisted != null && (onlyAlarmId == null || persisted.alarmId == onlyAlarmId)) {
             store.setActiveRing(null)
-            (app.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(NOTIFICATION_ID)
             RingEvents.emitStopped(persisted.alarmId, persisted.scheduledFor, reason)
+          }
+          if (onlyAlarmId == null || persisted == null || persisted.alarmId == onlyAlarmId) {
+            // Also removes a fallback notification posted without the service.
+            (app.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(NOTIFICATION_ID)
           }
           val saved = store.getSavedAlarmVolume()
           if (saved >= 0) {
@@ -557,9 +579,12 @@ class AlarmRingService : Service() {
     }
 
     /** Used when the foreground service cannot be started at all. */
-    fun postFallbackNotification(context: Context, alarmId: String) {
+    fun postFallbackNotification(context: Context, alarmId: String, scheduledFor: Long, isSnooze: Boolean) {
       try {
-        val label = AlarmStore.get(context).getSpec(alarmId)?.label ?: "Alarm"
+        val store = AlarmStore.get(context)
+        // Persist the ring so the app shows the challenge screen when opened.
+        store.setActiveRing(ActiveRing(alarmId, System.currentTimeMillis(), scheduledFor, isSnooze, usingFallbackSound = true))
+        val label = store.getSpec(alarmId)?.label ?: "Alarm"
         (context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
           .notify(NOTIFICATION_ID, buildRingNotification(context, alarmId, label, withSound = true))
       } catch (e: Exception) {

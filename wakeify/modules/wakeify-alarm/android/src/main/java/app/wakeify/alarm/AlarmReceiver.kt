@@ -64,7 +64,7 @@ open class AlarmReceiver : BroadcastReceiver() {
         AlarmRingService.start(context, alarmId, scheduledFor, kind == FireKind.SNOOZE)
       } catch (e: Exception) {
         Log.e(TAG, "Could not start ring service for $alarmId", e)
-        AlarmRingService.postFallbackNotification(context, alarmId)
+        AlarmRingService.postFallbackNotification(context, alarmId, scheduledFor, kind == FireKind.SNOOZE)
       }
     } else {
       Log.w(TAG, "Ignoring stale FIRE for $alarmId (deleted or disabled)")
