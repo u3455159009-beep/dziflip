@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["WakeifyAlarmModule"]
+  },
+  "android": {
+    "modules": ["app.wakeify.alarm.WakeifyAlarmModule"]
+  }
+}

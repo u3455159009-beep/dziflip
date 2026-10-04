@@ -1,0 +1,82 @@
+{
+  "expo": {
+    "name": "Wakeify",
+    "slug": "wakeify",
+    "version": "1.0.0",
+    "scheme": "wakeify",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "backgroundColor": "#0B1020",
+    "ios": {
+      "bundleIdentifier": "app.wakeify",
+      "supportsTablet": false,
+      "infoPlist": {
+        "NSAlarmKitUsageDescription": "Wakeify plánuje budíky přes systémové budíky iOS, aby zazvonily i při zamčeném telefonu, v tichém režimu a v režimu letadlo.",
+        "NSMotionUsageDescription": "Wakeify počítá kroky, které musíš ráno ujít, aby šel budík vypnout.",
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "entitlements": {
+        "com.apple.developer.usernotifications.time-sensitive": true
+      }
+    },
+    "android": {
+      "package": "app.wakeify",
+      "adaptiveIcon": {
+        "backgroundColor": "#0B1020",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "permissions": [
+        "android.permission.ACTIVITY_RECOGNITION"
+      ],
+      "blockedPermissions": [
+        "android.permission.RECORD_AUDIO"
+      ],
+      "predictiveBackGestureEnabled": false
+    },
+    "plugins": [
+      "expo-router",
+      "expo-sqlite",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": false,
+          "recordAudioAndroid": false,
+          "enableBackgroundPlayback": true
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Fotoaparát slouží k ranním úkolům: vyfocení předmětu a skenování QR kódu. Fotky zůstávají jen v telefonu.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false,
+          "barcodeScannerEnabled": true
+        }
+      ],
+      [
+        "expo-sensors",
+        {
+          "motionPermission": "Wakeify počítá kroky, které musíš ráno ujít, aby šel budík vypnout."
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 160,
+          "resizeMode": "contain",
+          "backgroundColor": "#F5F4FA",
+          "dark": {
+            "backgroundColor": "#0B1020"
+          }
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
