@@ -63,11 +63,11 @@ final class WakeifyNotificationEngine: WakeifyEngine {
   func sync(specs: [AlarmSpec]?) async -> [ScheduledResult] {
     let now = Date()
     var plans: [AlarmPlan] = []
-    var snoozes: [String: Double] = [:]
+    var snoozes: [String: SnoozeRecord] = [:]
     var tests: [String: Double] = [:]
     store.mutate { state in
-      WakeifyEngineSupport.applySpecs(specs, to: &state, now: now)
-      plans = WakeifyPlanner.plan(state: &state, now: now) { $0.maxRingMinutes * 60 }
+      WakeifyEngineSupport.applySpecs(specs, to: &state, now: now, ringWindow: Self.ringWindow)
+      plans = WakeifyPlanner.plan(state: &state, now: now, ringWindow: Self.ringWindow)
       snoozes = state.snoozes
       tests = state.testRings
     }
@@ -117,19 +117,29 @@ final class WakeifyNotificationEngine: WakeifyEngine {
         }
       }
       for occurrence in plan.ringOccurrences {
-        candidates += burst(spec: spec, kind: .burst, occurrence: occurrence, now: now, sound: sound, calendar: calendar)
+        candidates += burst(spec: spec, kind: .burst, anchor: occurrence, occurrence: occurrence, now: now, sound: sound, calendar: calendar)
       }
     }
     for spec in allSpecs {
       let sound = sounds[spec.id] ?? (nil, false)
-      for (kind, ms) in [(SystemAlarmKind.snooze, snoozes[spec.id]), (SystemAlarmKind.test, tests[spec.id])] {
-        guard let ms else { continue }
-        let date = dateFromMs(ms)
-        candidates.append(Candidate(
-          identifier: "\(Self.idPrefix)\(spec.id).\(kind.rawValue)", alarmId: spec.id, fireDate: date, tier: 0, isMain: false,
-          trigger: Self.oneShotTrigger(date, calendar: calendar),
-          content: makeContent(spec: spec, kind: kind, occurrence: date, soundName: sound.name, fallback: sound.fallback)))
-        candidates += burst(spec: spec, kind: kind, occurrence: date, now: now, sound: sound, calendar: calendar)
+      // Snooze: rings at triggerAt (bursts after it) but reports the ORIGINAL
+      // occurrence. Kept after it fired so its remaining bursts survive re-syncs.
+      // Test: rings at its own time and reports that time.
+      var oneOffs: [(kind: SystemAlarmKind, at: Date, occurrence: Date)] = []
+      if spec.enabled, let snooze = snoozes[spec.id] {
+        oneOffs.append((SystemAlarmKind.snooze, dateFromMs(snooze.triggerAt), dateFromMs(snooze.occurrence)))
+      }
+      if let ms = tests[spec.id] {
+        oneOffs.append((SystemAlarmKind.test, dateFromMs(ms), dateFromMs(ms)))
+      }
+      for oneOff in oneOffs {
+        if oneOff.at > now {
+          candidates.append(Candidate(
+            identifier: "\(Self.idPrefix)\(spec.id).\(oneOff.kind.rawValue)", alarmId: spec.id, fireDate: oneOff.at, tier: 0, isMain: false,
+            trigger: Self.oneShotTrigger(oneOff.at, calendar: calendar),
+            content: makeContent(spec: spec, kind: oneOff.kind, occurrence: oneOff.occurrence, soundName: sound.name, fallback: sound.fallback)))
+        }
+        candidates += burst(spec: spec, kind: oneOff.kind, anchor: oneOff.at, occurrence: oneOff.occurrence, now: now, sound: sound, calendar: calendar)
       }
     }
 
@@ -159,17 +169,23 @@ final class WakeifyNotificationEngine: WakeifyEngine {
     }
   }
 
-  private func burst(spec: AlarmSpec, kind: SystemAlarmKind, occurrence: Date, now: Date,
+  static func ringWindow(_ spec: AlarmSpec) -> TimeInterval {
+    return spec.maxRingMinutes * 60
+  }
+
+  /// Keep-ringing notifications every 30 s after `anchor` (the moment the
+  /// ring starts), all reporting `occurrence` as the ring's scheduledFor.
+  private func burst(spec: AlarmSpec, kind: SystemAlarmKind, anchor: Date, occurrence: Date, now: Date,
                      sound: (name: String?, fallback: Bool), calendar: Calendar) -> [Candidate] {
     let count = Int((spec.maxRingMinutes * 60 / Self.burstInterval).rounded(.down))
     guard count > 1 else { return [] }
     var result: [Candidate] = []
-    let occurrenceMs = Int64(epochMs(occurrence))
+    let anchorMs = Int64(epochMs(anchor))
     for k in 1..<count {
-      let fire = occurrence.addingTimeInterval(Double(k) * Self.burstInterval)
+      let fire = anchor.addingTimeInterval(Double(k) * Self.burstInterval)
       guard fire > now.addingTimeInterval(1) else { continue }
       result.append(Candidate(
-        identifier: "\(Self.idPrefix)\(spec.id).\(kind.rawValue).\(occurrenceMs).\(k)", alarmId: spec.id, fireDate: fire, tier: 1, isMain: false,
+        identifier: "\(Self.idPrefix)\(spec.id).\(kind.rawValue).\(anchorMs).\(k)", alarmId: spec.id, fireDate: fire, tier: 1, isMain: false,
         trigger: Self.oneShotTrigger(fire, calendar: calendar),
         content: makeContent(spec: spec, kind: kind, occurrence: occurrence, soundName: sound.name, fallback: sound.fallback)))
     }
@@ -200,16 +216,35 @@ final class WakeifyNotificationEngine: WakeifyEngine {
     return content
   }
 
+  /// Snoozes the current unhandled occurrence of `alarmId` until `date`:
+  /// clears its ring records and delivered notifications, drops its bursts
+  /// and arms new ones after the snooze time (via sync).
   func scheduleSnooze(alarmId: String, at date: Date) async throws {
-    store.mutate { state in state.snoozes[alarmId] = epochMs(date) }
+    let now = Date()
+    let rings = await deliveredRings()
+    store.mutate { state in
+      let delivered = rings.map { ringRecord(from: $0, rings: rings, state: state) }
+      state.beginSnooze(alarmId: alarmId, triggerAt: date, now: now, alerting: delivered)
+    }
+    await removeDelivered(alarmId: alarmId)
+    lock.withLock { emittedRingKey = nil }
     _ = await sync(specs: nil)
   }
 
+  /// Removes the snooze and its bursts; the snoozed occurrence is not re-armed.
   func cancelSnooze(alarmId: String) async {
-    store.mutate { state in _ = state.snoozes.removeValue(forKey: alarmId) }
-    let prefix = "\(Self.idPrefix)\(alarmId).\(SystemAlarmKind.snooze.rawValue)"
-    let pending = await center.pendingNotificationRequests()
-    center.removePendingNotificationRequests(withIdentifiers: pending.map(\.identifier).filter { $0.hasPrefix(prefix) })
+    store.mutate { state in
+      if let snooze = state.snoozes.removeValue(forKey: alarmId) {
+        state.handledOccurrences[alarmId] = max(state.handledOccurrences[alarmId] ?? 0, snooze.occurrence)
+      }
+    }
+    _ = await sync(specs: nil)
+  }
+
+  private func removeDelivered(alarmId: String) async {
+    let delivered = await center.deliveredNotifications()
+    center.removeDeliveredNotifications(withIdentifiers: delivered.map(\.request.identifier)
+      .filter { $0.hasPrefix("\(Self.idPrefix)\(alarmId).") })
   }
 
   func scheduleTest(alarmId: String, at date: Date) async throws {
@@ -224,7 +259,17 @@ final class WakeifyNotificationEngine: WakeifyEngine {
     var occurrence: Double
     var deliveredAt: Double
     var isSnooze: Bool
+    var isTest: Bool
     var fallback: Bool
+  }
+
+  private func ringRecord(from ring: DeliveredRing, rings: [DeliveredRing], state: PersistedState) -> ActiveRingRecord {
+    let startedAt = rings
+      .filter { $0.alarmId == ring.alarmId && $0.occurrence == ring.occurrence && $0.isSnooze == ring.isSnooze }
+      .map(\.deliveredAt).min() ?? ring.deliveredAt
+    return ActiveRingRecord(alarmId: ring.alarmId, startedAt: startedAt, scheduledFor: ring.occurrence,
+                            isSnooze: ring.isSnooze, isTest: ring.isTest, usingFallbackSound: ring.fallback,
+                            expiresAt: state.expiry(for: ring.alarmId, scheduledFor: ring.occurrence, isSnooze: ring.isSnooze))
   }
 
   private func deliveredRings() async -> [DeliveredRing] {
@@ -243,6 +288,7 @@ final class WakeifyNotificationEngine: WakeifyEngine {
       let kind = info["wakeifyKind"] as? String
       return DeliveredRing(alarmId: alarmId, occurrence: occurrence, deliveredAt: deliveredAt,
                            isSnooze: kind == SystemAlarmKind.snooze.rawValue,
+                           isTest: kind == SystemAlarmKind.test.rawValue,
                            fallback: (info["wakeifyFallbackSound"] as? Bool) ?? false)
     }
   }
@@ -252,17 +298,13 @@ final class WakeifyNotificationEngine: WakeifyEngine {
     let rings = await deliveredRings()
     let ring: ActiveRingRecord? = store.mutate { state in
       let nowMs = epochMs(now)
-      let live = rings.filter { ring in
-        let handled = state.handledOccurrences[ring.alarmId] ?? 0
-        return ring.occurrence > handled && state.expiry(for: ring.alarmId, scheduledFor: ring.occurrence) > nowMs
-      }
-      if let latest = live.max(by: { $0.occurrence < $1.occurrence }) {
-        let startedAt = live.filter { $0.alarmId == latest.alarmId && $0.occurrence == latest.occurrence }
-          .map(\.deliveredAt).min() ?? latest.deliveredAt
-        let record = ActiveRingRecord(alarmId: latest.alarmId, startedAt: startedAt, scheduledFor: latest.occurrence,
-                                      isSnooze: latest.isSnooze, usingFallbackSound: latest.fallback,
-                                      expiresAt: state.expiry(for: latest.alarmId, scheduledFor: latest.occurrence))
-        if state.activeRing?.alarmId != record.alarmId || state.activeRing?.scheduledFor != record.scheduledFor {
+      let live = rings
+        .map { ringRecord(from: $0, rings: rings, state: state) }
+        .filter { $0.expiresAt > nowMs && state.isRingValid($0, nowMs: nowMs) }
+      // Latest occurrence wins; for the same occurrence the snooze ring wins.
+      if let record = live.max(by: { ($0.scheduledFor, $0.isSnooze ? 1 : 0) < ($1.scheduledFor, $1.isSnooze ? 1 : 0) }) {
+        if state.activeRing?.alarmId != record.alarmId || state.activeRing?.scheduledFor != record.scheduledFor
+            || state.activeRing?.isSnooze != record.isSnooze {
           state.activeRing = record
         }
         return state.activeRing
@@ -275,7 +317,7 @@ final class WakeifyNotificationEngine: WakeifyEngine {
 
   private func emitStartedIfNew(_ ring: ActiveRingRecord?) {
     guard let ring else { return }
-    let key = "\(ring.alarmId)|\(Int64(ring.scheduledFor))"
+    let key = "\(ring.alarmId)|\(Int64(ring.scheduledFor))|\(ring.isSnooze)"
     lock.lock()
     let isNew = emittedRingKey != key
     emittedRingKey = key
@@ -297,26 +339,19 @@ final class WakeifyNotificationEngine: WakeifyEngine {
     let now = Date()
     let rings = await deliveredRings()
     let ended: ActiveRingRecord? = store.mutate { state in
-      var occurrence: Double = 0
-      for ring in [state.activeRing, state.pendingRing].compactMap({ $0 }) where ring.alarmId == alarmId {
-        occurrence = max(occurrence, ring.scheduledFor)
-      }
-      for ring in rings where ring.alarmId == alarmId && ring.occurrence <= epochMs(now) {
-        occurrence = max(occurrence, ring.occurrence)
-      }
-      if occurrence == 0 {
-        occurrence = (state.armedOccurrences[alarmId] ?? []).filter { $0 <= epochMs(now) }.max() ?? epochMs(now)
-      }
+      let delivered = rings
+        .filter { $0.occurrence <= epochMs(now) }
+        .map { ringRecord(from: $0, rings: rings, state: state) }
+      let occurrence = state.occurrenceToHandle(alarmId: alarmId, now: now, alerting: delivered)
       state.handledOccurrences[alarmId] = max(state.handledOccurrences[alarmId] ?? 0, occurrence)
       let endedRing = state.activeRing?.alarmId == alarmId ? state.activeRing : nil
       if state.activeRing?.alarmId == alarmId { state.activeRing = nil }
       if state.pendingRing?.alarmId == alarmId { state.pendingRing = nil }
-      if let snooze = state.snoozes[alarmId], snooze <= epochMs(now) { state.snoozes.removeValue(forKey: alarmId) }
+      // Handling clears any snooze (pending or fired) and, via sync, its bursts.
+      state.snoozes.removeValue(forKey: alarmId)
       return endedRing
     }
-    let delivered = await center.deliveredNotifications()
-    center.removeDeliveredNotifications(withIdentifiers: delivered.map(\.request.identifier)
-      .filter { $0.hasPrefix("\(Self.idPrefix)\(alarmId).") })
+    await removeDelivered(alarmId: alarmId)
     // Re-sync removes the handled occurrence's bursts and arms the next one.
     _ = await sync(specs: nil)
     if let ended {

@@ -59,6 +59,9 @@ public class WakeifyAlarmModule: Module {
         try Self.requireKnownAlarm(alarmId)
         let engine = await self.currentEngine()
         try await engine.scheduleSnooze(alarmId: alarmId, at: dateFromMs(triggerAt))
+        // The snooze ring reports the same scheduledFor as the original ring,
+        // so its onRingStarted must not be swallowed by the duplicate filter.
+        self.resetStartedKey()
         return nil
       }
     }
@@ -90,6 +93,7 @@ public class WakeifyAlarmModule: Module {
       self.run(promise) {
         let engine = await self.currentEngine()
         await engine.markHandled(alarmId: alarmId)
+        self.resetStartedKey()
         return nil
       }
     }
@@ -262,6 +266,10 @@ public class WakeifyAlarmModule: Module {
   }
 
   // MARK: - Helpers
+
+  private func resetStartedKey() {
+    engineLock.withLock { lastStartedKey = nil }
+  }
 
   private func run(_ promise: Promise, serial: Bool = true, _ operation: @escaping () async throws -> Any?) {
     Task {

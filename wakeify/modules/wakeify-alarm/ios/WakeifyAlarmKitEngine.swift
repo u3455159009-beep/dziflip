@@ -120,13 +120,11 @@ final class WakeifyAlarmKitEngine: WakeifyEngine {
   func sync(specs: [AlarmSpec]?) async -> [ScheduledResult] {
     let now = Date()
     var plans: [AlarmPlan] = []
-    var snoozes: [String: Double] = [:]
+    var snoozes: [String: SnoozeRecord] = [:]
     var tests: [String: Double] = [:]
     store.mutate { state in
-      WakeifyEngineSupport.applySpecs(specs, to: &state, now: now)
-      plans = WakeifyPlanner.plan(state: &state, now: now) { spec in
-        spec.backupRepeatMinutes > 0 ? Double(spec.backupCount) * spec.backupRepeatMinutes * 60 + 60 : 0
-      }
+      WakeifyEngineSupport.applySpecs(specs, to: &state, now: now, ringWindow: Self.ringWindow)
+      plans = WakeifyPlanner.plan(state: &state, now: now, ringWindow: Self.ringWindow)
       snoozes = state.snoozes
       tests = state.testRings
     }
@@ -195,11 +193,26 @@ final class WakeifyAlarmKitEngine: WakeifyEngine {
     }
     for spec in allSpecs {
       let sound = sounds[spec.id] ?? (nil, false)
-      if let ms = snoozes[spec.id] {
-        let date = dateFromMs(ms)
-        requests.append(Request(uuid: WakeifyIds.snooze(spec.id), schedule: .fixed(date),
-                                record: SystemAlarmRecord(alarmId: spec.id, kind: .snooze, occurrence: ms, fireAt: ms, hour: spec.hour, minute: spec.minute, usingFallbackSound: sound.fallback),
-                                title: spec.displayTitle, soundName: sound.name))
+      if spec.enabled, let snooze = snoozes[spec.id] {
+        // The snooze ring reports the ORIGINAL occurrence; its backups are
+        // armed relative to the snooze time.
+        let snoozeAt = dateFromMs(snooze.triggerAt)
+        if snoozeAt > now {
+          requests.append(Request(uuid: WakeifyIds.snooze(spec.id), schedule: .fixed(snoozeAt),
+                                  record: SystemAlarmRecord(alarmId: spec.id, kind: .snooze, occurrence: snooze.occurrence, fireAt: snooze.triggerAt,
+                                                            hour: spec.hour, minute: spec.minute, usingFallbackSound: sound.fallback, fromSnooze: true),
+                                  title: spec.displayTitle, soundName: sound.name))
+        }
+        if spec.backupRepeatMinutes > 0 && spec.backupCount > 0 {
+          for k in 1...spec.backupCount {
+            let fire = snoozeAt.addingTimeInterval(Double(k) * spec.backupRepeatMinutes * 60)
+            guard fire > now else { continue }
+            backupRequests.append(Request(uuid: WakeifyIds.snoozeBackup(spec.id, index: k), schedule: .fixed(fire),
+                                          record: SystemAlarmRecord(alarmId: spec.id, kind: .backup, occurrence: snooze.occurrence, fireAt: epochMs(fire),
+                                                                    hour: spec.hour, minute: spec.minute, usingFallbackSound: sound.fallback, fromSnooze: true),
+                                          title: spec.displayTitle, soundName: sound.name))
+          }
+        }
       }
       if let ms = tests[spec.id] {
         let date = dateFromMs(ms)
@@ -254,7 +267,9 @@ final class WakeifyAlarmKitEngine: WakeifyEngine {
       metadata: WakeifyAlarmMetadata(alarmId: request.record.alarmId, kind: request.record.kind.rawValue),
       tintColor: Color(red: 1.0, green: 0.45, blue: 0.2))
     let sound: AlertConfiguration.AlertSound = request.soundName.map { AlertConfiguration.AlertSound.named($0) } ?? .default
-    let intent = WakeifyOpenAlarmIntent(alarmId: request.record.alarmId, kind: request.record.kind.rawValue, occurrence: request.record.occurrence ?? 0)
+    // Backups armed after a snooze report as the snooze ring.
+    let intentKind = request.record.fromSnooze == true ? SystemAlarmKind.snooze.rawValue : request.record.kind.rawValue
+    let intent = WakeifyOpenAlarmIntent(alarmId: request.record.alarmId, kind: intentKind, occurrence: request.record.occurrence ?? 0)
     return AlarmManager.AlarmConfiguration<WakeifyAlarmMetadata>(
       countdownDuration: nil,
       schedule: request.schedule,
@@ -277,18 +292,39 @@ final class WakeifyAlarmKitEngine: WakeifyEngine {
     }
   }
 
+  /// Backup window used for armed occurrences and for keeping snooze records.
+  static func ringWindow(_ spec: AlarmSpec) -> TimeInterval {
+    return spec.backupRepeatMinutes > 0 ? Double(spec.backupCount) * spec.backupRepeatMinutes * 60 + 60 : 0
+  }
+
+  /// Snoozes the current unhandled occurrence of `alarmId` until `date`:
+  /// stops it if still alerting, clears its active/pending ring, drops its
+  /// backups and arms new ones relative to the snooze (via sync).
   func scheduleSnooze(alarmId: String, at date: Date) async throws {
-    store.mutate { state in state.snoozes[alarmId] = epochMs(date) }
+    let now = Date()
+    let alarms = (try? manager.alarms) ?? []
+    let ours: Set<String> = store.mutate { state in
+      let alerting = alarms.filter { $0.state == .alerting }
+        .compactMap { ringRecord(for: $0, state: state, now: now) }
+      state.beginSnooze(alarmId: alarmId, triggerAt: date, now: now, alerting: alerting)
+      return Set(state.systemAlarms.filter { $0.value.alarmId == alarmId }.keys)
+    }
+    for alarm in alarms where alarm.state == .alerting && ours.contains(alarm.id.uuidString) {
+      lock.withLock { _ = stopRequested.insert(alarm.id.uuidString) }
+      try? manager.stop(id: alarm.id)
+    }
     _ = await sync(specs: nil)
   }
 
+  /// Removes the snooze and its backups. The snoozed occurrence is not
+  /// re-armed (its old backups stay cancelled).
   func cancelSnooze(alarmId: String) async {
-    let uuid = WakeifyIds.snooze(alarmId)
-    try? manager.cancel(id: uuid)
     store.mutate { state in
-      state.snoozes.removeValue(forKey: alarmId)
-      state.systemAlarms.removeValue(forKey: uuid.uuidString)
+      if let snooze = state.snoozes.removeValue(forKey: alarmId) {
+        state.handledOccurrences[alarmId] = max(state.handledOccurrences[alarmId] ?? 0, snooze.occurrence)
+      }
     }
+    _ = await sync(specs: nil)
   }
 
   func scheduleTest(alarmId: String, at date: Date) async throws {
@@ -307,15 +343,17 @@ final class WakeifyAlarmKitEngine: WakeifyEngine {
       scheduledFor = epochMs(previous)
     }
     let occurrence = scheduledFor ?? epochMs(now)
+    let isSnooze = record.kind == .snooze || record.fromSnooze == true
     let previousRing = [state.activeRing, state.pendingRing].compactMap { $0 }
-      .first { $0.alarmId == record.alarmId && $0.scheduledFor == occurrence }
+      .first { $0.alarmId == record.alarmId && $0.scheduledFor == occurrence && $0.isSnooze == isSnooze }
     return ActiveRingRecord(
       alarmId: record.alarmId,
       startedAt: previousRing?.startedAt ?? epochMs(now),
       scheduledFor: occurrence,
-      isSnooze: record.kind == .snooze,
+      isSnooze: isSnooze,
+      isTest: record.kind == .test,
       usingFallbackSound: record.usingFallbackSound,
-      expiresAt: state.expiry(for: record.alarmId, scheduledFor: occurrence))
+      expiresAt: state.expiry(for: record.alarmId, scheduledFor: occurrence, isSnooze: isSnooze))
   }
 
   func activeRing() async -> ActiveRingRecord? {
@@ -324,7 +362,7 @@ final class WakeifyAlarmKitEngine: WakeifyEngine {
     return store.mutate { state in
       for alarm in alarms where alarm.state == .alerting {
         if let ring = ringRecord(for: alarm, state: state, now: now),
-           (state.handledOccurrences[ring.alarmId] ?? 0) < ring.scheduledFor {
+           state.isRingValid(ring, nowMs: epochMs(now)) {
           state.activeRing = ring
           return ring
         }
@@ -346,22 +384,14 @@ final class WakeifyAlarmKitEngine: WakeifyEngine {
     let now = Date()
     let alarms = (try? manager.alarms) ?? []
     store.mutate { state in
-      var occurrence: Double = 0
-      for ring in [state.activeRing, state.pendingRing].compactMap({ $0 }) where ring.alarmId == alarmId {
-        occurrence = max(occurrence, ring.scheduledFor)
-      }
-      for alarm in alarms where alarm.state == .alerting {
-        if let ring = ringRecord(for: alarm, state: state, now: now), ring.alarmId == alarmId {
-          occurrence = max(occurrence, ring.scheduledFor)
-        }
-      }
-      if occurrence == 0 {
-        occurrence = (state.armedOccurrences[alarmId] ?? []).filter { $0 <= epochMs(now) }.max() ?? epochMs(now)
-      }
+      let alerting = alarms.filter { $0.state == .alerting }
+        .compactMap { ringRecord(for: $0, state: state, now: now) }
+      let occurrence = state.occurrenceToHandle(alarmId: alarmId, now: now, alerting: alerting)
       state.handledOccurrences[alarmId] = max(state.handledOccurrences[alarmId] ?? 0, occurrence)
       if state.activeRing?.alarmId == alarmId { state.activeRing = nil }
       if state.pendingRing?.alarmId == alarmId { state.pendingRing = nil }
-      if let snooze = state.snoozes[alarmId], snooze <= epochMs(now) { state.snoozes.removeValue(forKey: alarmId) }
+      // Handling clears any snooze (pending or fired) and, via sync, its backups.
+      state.snoozes.removeValue(forKey: alarmId)
     }
     let ours = store.read { state in Set(state.systemAlarms.filter { $0.value.alarmId == alarmId }.keys) }
     for alarm in alarms where alarm.state == .alerting && ours.contains(alarm.id.uuidString) {
@@ -406,7 +436,7 @@ final class WakeifyAlarmKitEngine: WakeifyEngine {
       for alarm in alarms where alarm.state == .alerting {
         if let ring = ringRecord(for: alarm, state: state, now: now) {
           result[alarm.id.uuidString] = ring
-          if (state.handledOccurrences[ring.alarmId] ?? 0) < ring.scheduledFor {
+          if state.isRingValid(ring, nowMs: epochMs(now)) {
             state.activeRing = ring
           }
         }

@@ -47,7 +47,7 @@ enum WakeifyEngineSupport {
     state.snoozes = state.snoozes.filter { alarmId, snooze in
       guard let spec = specsById[alarmId], spec.enabled else { return false }
       if (handled[alarmId] ?? 0) >= snooze.occurrence { return false }
-      return snooze.triggerAt + max(ringWindow(spec), 60) * 1000 > nowMs
+      return snooze.triggerAt + max(ringWindow(spec), spec.ringWindowSeconds, 60) * 1000 > nowMs
     }
     state.testRings = state.testRings.filter { ids.contains($0.key) && $0.value > nowMs }
     state.handledOccurrences = state.handledOccurrences.filter { ids.contains($0.key) }

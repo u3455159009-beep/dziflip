@@ -37,7 +37,7 @@ The JS contract is `../src/WakeifyAlarm.types.ts` (`WakeifyAlarmNativeModule`). 
 * **Every sync** cancels all of the app's AlarmKit alarms that are *not* currently `.alerting`, then schedules again in priority order: main/skip alarms, then snooze/test, then backups (soonest first). A sync never silences a ringing alarm. On `AlarmManager.AlarmError.maximumLimitReached`, scheduling stops and the remaining lower-priority alarms (mostly backups) are skipped. `triggerAt` is `null` for any alarm whose main schedule could not be created.
 * **Backup re-alarms:** the user can always silence AlarmKit's system Stop button. So for each armed occurrence *T*, the engine schedules `backupCount` `.fixed` alarms at *T* + k·`backupRepeatMinutes`. "Armed" means the next occurrence, plus an earlier one that is still unhandled and inside its window. `markOccurrenceHandled(alarmId)` records the handled occurrence, stops ringing alarms of that id, and re-syncs, which drops that occurrence's backups and arms the next one.
 * **"Otevřít Wakeify"** is the secondary button with `.custom` behavior and `WakeifyOpenAlarmIntent: LiveActivityIntent` (`supportedModes = .foreground`, plus `openAppWhenRun = true` as in Apple's WWDC25 sample). Its `perform()` writes a **pending ring** into the store, posts an in-process notification (the module turns it into `onRingStarted`), and calls `UIApplication.shared.open(wakeify://ring?alarmId=…)` as a best effort. Whether that URL reaches JS during a cold launch is not guaranteed, so **JS must call `getActiveRing()` on launch/foreground**, which also returns the pending ring.
-* **`getActiveRing()`** reports, in order: one of our alarms in state `.alerting`, the persisted active ring, then the pending ring from the intent. A ring record stays valid until `markOccurrenceHandled` or until `scheduledFor + (backupCount·backupRepeatMinutes + maxRingMinutes)` minutes. So after the user taps the system Stop, the app still sees the unhandled ring and can show the challenge.
+* **`getActiveRing()`** (fields include `isSnooze` and `isTest`) reports, in order: one of our alarms in state `.alerting`, the persisted active ring, then the pending ring from the intent. A ring record stays valid until `markOccurrenceHandled` or until `scheduledFor + (backupCount·backupRepeatMinutes + maxRingMinutes)` minutes. So after the user taps the system Stop, the app still sees the unhandled ring and can show the challenge.
 * **Events:** while the module is alive, a `Task` iterates `AlarmManager.shared.alarmUpdates`. `onRingStarted` fires when one of our alarms enters `.alerting`. `onRingStopped` fires when it leaves that state, with reason `'dismissed'` if we stopped it (`stopRinging` / `markOccurrenceHandled`) and `'system'` otherwise. `'timeout'` is never reported on iOS. Duplicate `onRingStarted` events (the observer plus the intent) are collapsed per `alarmId|scheduledFor`.
 * **`stopRinging()`** calls `AlarmManager.shared.stop(id:)` on our alerting alarms. A one-shot alarm is deleted; a repeating one moves to its next occurrence. The module plays no audio of its own; the in-app full track is JS/expo-audio.
 
@@ -57,9 +57,24 @@ The JS contract is `../src/WakeifyAlarm.types.ts` (`WakeifyAlarmNativeModule`). 
 * `getActiveRing()` derives the ring from our delivered notifications that are unhandled and inside their window, and emits `onRingStarted` once per occurrence. `stopRinging()` removes our delivered notifications. Pending bursts stay, so leaving the app keeps ringing. `markOccurrenceHandled` removes the occurrence's bursts and delivered notifications.
 * **Hard limits of this fallback:** it **cannot ring through the silent switch or through a Focus** that doesn't allow Wakeify. Each sound is **≤ 30 s** and plays once per notification. The module installs no `UNUserNotificationCenterDelegate`, so taps just open the app, foreground deliveries are not presented, and JS has to call `getActiveRing()`. If no notification permission is granted, nothing is scheduled and every `triggerAt` is `null`.
 
+## Snooze semantics (both engines)
+
+`scheduleSnooze(alarmId, triggerAt)` marks the **current unhandled occurrence** of the alarm as *snoozed until `triggerAt`*. The occurrence is taken from the alerting alarm or delivered notifications, else the persisted or pending ring, else the latest armed past occurrence. A re-snooze keeps the original occurrence. The call then does the following:
+
+* Persists `snoozes[alarmId] = { triggerAt, occurrence }` in the store.
+* Clears the active and pending ring of that alarm. `getActiveRing()` returns `null` until the snooze fires: `PersistedState.isRingValid` rejects any non-snooze ring of a snoozed occurrence, and any snooze ring before its time.
+* Stops any still-alerting AlarmKit alarm of that id, or removes its delivered notifications.
+* Re-syncs. The planner skips armed occurrences ≤ the snoozed occurrence, so that occurrence's backups and bursts are cancelled and not re-armed by a later app-active re-sync. New ones are armed relative to the snooze instead:
+  * AlarmKit: the snooze alarm at `triggerAt`, plus backups at `triggerAt + k·backupRepeatMinutes` (UUIDs `id+"snoozebackup:k"`).
+  * Notifications: the snooze notification, plus bursts every 30 s after `triggerAt`.
+* When the snooze rings, `getActiveRing()` and `onRingStarted` report `isSnooze: true` and **`scheduledFor` = the original occurrence**. This also applies to the snooze's backups and bursts. The snooze ring's expiry is measured from `triggerAt`.
+* The snooze record is kept after it fires, until `triggerAt` + the ring window, so its remaining backups and bursts survive re-syncs. It is dropped earlier by `markOccurrenceHandled`, which clears the snooze, its backups and the ring, or by disabling or removing the alarm.
+* `cancelSnooze(alarmId)` removes the snooze and its backups and bursts. It also records the snoozed occurrence as handled, so nothing from that occurrence comes back.
+* The module resets its duplicate filter for `onRingStarted` after `scheduleSnooze` and `markOccurrenceHandled`, because the snooze ring reuses the original `scheduledFor`.
+
 ## Other functions
 
-* `scheduleSnooze(alarmId, triggerAt)` / `scheduleTestRing(alarmId, seconds)` make one-off rings through the active engine, using the stored spec's sound and label. Both reject with `ERR_WAKEIFY_ALARM` if the id was never synced. `cancelSnooze` removes the snooze.
+* `scheduleTestRing(alarmId, seconds)` makes a one-off ring through the active engine, using the stored spec's sound and label. That ring reports `isTest: true` and `scheduledFor` = its own trigger time. It rejects with `ERR_WAKEIFY_ALARM` if the id was never synced, and so does `scheduleSnooze`.
 * `setShowOverLockScreen` is a no-op on iOS.
 * `getPermissionStatus()`: `platform: 'ios'`; `exactAlarms`, `fullScreenIntent` and `batteryOptimizationIgnored` are `'unsupported'`; `notifications` comes from `getNotificationSettings`; `alarmKit` comes from `AlarmManager.shared.authorizationState`.
 * `requestPermission('alarmKit' | 'notifications')` shows the real prompt; any other kind returns `'unsupported'`.
@@ -101,6 +116,7 @@ struct WakeifyAppIntents: AppIntentsPackage {
 * Whether `AlertSound.named("wakeify_….caf")` from `Library/Sounds` plays on a release iOS 26.x device. Only forum reports cover this. Also unverified: whether the file name must include the extension (it is passed with `.caf`, as in the forum example `"Glass Drum.caf"`).
 * Whether `WakeifyOpenAlarmIntent` is discovered from the pod (see above), and whether `supportedModes = .foreground` together with `openAppWhenRun` actually foregrounds the app from the alarm UI.
 * Whether `UIApplication.shared.open(wakeify://…)` called from inside the intent reaches expo-router during a cold launch. The pending-ring fallback covers the case where it does not.
+* Snooze flow end to end (stop, then `scheduleSnooze`, then the snooze ring with backups) on a device, including the `onRingStopped` `'dismissed'` event emitted when the snooze call stops a still-alerting alarm.
 * Calling `schedule(id:)` with an id that was just `cancel`ed in the same run loop. The engine always cancels before it schedules.
 * The exact `maximumLimitReached` limit, and how many backups fit.
 * `AlarmManager.stop(id:)` on a `.fixed` alarm that is alerting, which is expected to delete it.
