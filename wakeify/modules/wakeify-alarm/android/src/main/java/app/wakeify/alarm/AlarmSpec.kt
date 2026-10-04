@@ -121,7 +121,9 @@ data class ActiveRing(
   val startedAt: Long,
   val scheduledFor: Long,
   val isSnooze: Boolean,
-  val usingFallbackSound: Boolean
+  val usingFallbackSound: Boolean,
+  /** Ring started by scheduleTestRing (FireKind.TEST). */
+  val isTest: Boolean = false
 ) {
   fun toJson(): JSONObject = JSONObject().apply {
     put("alarmId", alarmId)
@@ -129,6 +131,7 @@ data class ActiveRing(
     put("scheduledFor", scheduledFor)
     put("isSnooze", isSnooze)
     put("usingFallbackSound", usingFallbackSound)
+    put("isTest", isTest)
   }
 
   companion object {
@@ -137,7 +140,8 @@ data class ActiveRing(
       startedAt = o.getLong("startedAt"),
       scheduledFor = o.getLong("scheduledFor"),
       isSnooze = o.optBoolean("isSnooze", false),
-      usingFallbackSound = o.optBoolean("usingFallbackSound", false)
+      usingFallbackSound = o.optBoolean("usingFallbackSound", false),
+      isTest = o.optBoolean("isTest", false) // missing in data written by older versions
     )
   }
 }

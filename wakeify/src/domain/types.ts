@@ -128,8 +128,9 @@ export const DEFAULT_SETTINGS: Settings = {
   affirmation: 'Dnešek je nová příležitost. Nadechni se a jdi do toho.',
   onTimeGraceMinutes: 10,
   maxRingMinutes: 30,
-  backupRepeatMinutes: 2,
-  backupCount: 5,
+  // AlarmKit plays a custom sound once (≤30 s, no loop), so re-alarm every minute.
+  backupRepeatMinutes: 1,
+  backupCount: 10,
   defaultSnoozeMinutes: 5,
   defaultMaxSnoozes: 2,
   onboardingDone: false,

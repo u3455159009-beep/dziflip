@@ -172,6 +172,7 @@ class WakeifyAlarmModule : Module() {
       "startedAt" to ring.startedAt.toDouble(),
       "scheduledFor" to ring.scheduledFor.toDouble(),
       "isSnooze" to ring.isSnooze,
+      "isTest" to ring.isTest,
       "usingFallbackSound" to ring.usingFallbackSound
     )
   }

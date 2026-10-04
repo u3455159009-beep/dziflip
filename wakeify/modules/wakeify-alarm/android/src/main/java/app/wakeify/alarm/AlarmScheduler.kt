@@ -61,9 +61,9 @@ class AlarmScheduler(context: Context) {
     val results = store.getSpecs().map { scheduleRegular(it, nowMillis, zone, recoverMissed) }
     for ((id, t) in store.getSnoozes()) {
       when {
-        t > nowMillis -> setAlarm(FireKind.SNOOZE, id, t, t)
+        t > nowMillis -> setAlarm(FireKind.SNOOZE, id, t, store.getSnoozeOrigin(id) ?: t, snoozeTriggerAt = t)
         recoverMissed && nowMillis - t <= RECOVERY_WINDOW_MS && store.getFired(snoozeFiredKey(id)) != t ->
-          setAlarm(FireKind.SNOOZE, id, nowMillis + RECOVERY_DELAY_MS, t)
+          setAlarm(FireKind.SNOOZE, id, nowMillis + RECOVERY_DELAY_MS, store.getSnoozeOrigin(id) ?: t, snoozeTriggerAt = t)
         else -> store.removeSnooze(id)
       }
     }
@@ -94,8 +94,22 @@ class AlarmScheduler(context: Context) {
 
   @Synchronized
   fun scheduleSnooze(alarmId: String, triggerAt: Long): Boolean {
+    val origin = snoozeOrigin(alarmId, triggerAt)
     store.putSnooze(alarmId, triggerAt)
-    return setAlarm(FireKind.SNOOZE, alarmId, triggerAt, triggerAt)
+    store.putSnoozeOrigin(alarmId, origin)
+    return setAlarm(FireKind.SNOOZE, alarmId, triggerAt, origin, snoozeTriggerAt = triggerAt)
+  }
+
+  /**
+   * Original occurrence a new snooze belongs to: the ring currently active for
+   * this alarm (already the original one if it was itself a snooze), else the
+   * last fired regular occurrence, else the snooze time itself.
+   */
+  private fun snoozeOrigin(alarmId: String, triggerAt: Long): Long {
+    store.getActiveRing()?.let { if (it.alarmId == alarmId && !it.isTest) return it.scheduledFor }
+    store.getSnoozeOrigin(alarmId)?.let { return it }
+    store.getFired(alarmId)?.let { return it }
+    return triggerAt
   }
 
   @Synchronized
@@ -119,12 +133,16 @@ class AlarmScheduler(context: Context) {
     return spec.enabled
   }
 
-  /** Bookkeeping after an occurrence fired: schedule the next one. */
+  /**
+   * Bookkeeping after an occurrence fired: schedule the next one.
+   * [triggerAt]: the instant the snooze was set for (snooze bookkeeping is keyed by it).
+   */
   @Synchronized
   fun onFired(
     alarmId: String,
     scheduledFor: Long,
     kind: FireKind,
+    triggerAt: Long = scheduledFor,
     nowMillis: Long = System.currentTimeMillis(),
     zone: ZoneId = ZoneId.systemDefault()
   ) {
@@ -142,17 +160,23 @@ class AlarmScheduler(context: Context) {
         }
       }
       FireKind.SNOOZE -> {
-        store.setFired(snoozeFiredKey(alarmId), scheduledFor)
+        store.setFired(snoozeFiredKey(alarmId), triggerAt)
         // Only clear when it is still the same snooze (a newer one may have been set).
-        if (store.getSnoozes()[alarmId] == scheduledFor) store.removeSnooze(alarmId)
+        if (store.getSnoozes()[alarmId] == triggerAt) store.removeSnooze(alarmId)
       }
       FireKind.TEST -> Unit
     }
   }
 
   /** Returns true when the alarm was registered as an exact alarm clock. */
-  private fun setAlarm(kind: FireKind, alarmId: String, triggerAt: Long, scheduledFor: Long): Boolean {
-    val op = AlarmIntents.firePendingIntent(ctx, kind, alarmId, scheduledFor)
+  private fun setAlarm(
+    kind: FireKind,
+    alarmId: String,
+    triggerAt: Long,
+    scheduledFor: Long,
+    snoozeTriggerAt: Long = triggerAt
+  ): Boolean {
+    val op = AlarmIntents.firePendingIntent(ctx, kind, alarmId, scheduledFor, snoozeTriggerAt)
     if (canScheduleExact()) {
       try {
         am.setAlarmClock(AlarmManager.AlarmClockInfo(triggerAt, AlarmIntents.showAppPendingIntent(ctx)), op)

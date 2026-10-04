@@ -9,7 +9,9 @@ import * as repo from '../data/repositories';
 import { computeStats } from '../domain/stats';
 import { formatTime } from '../domain/schedule';
 import type { WakeEvent } from '../domain/types';
+import { getActiveRing } from '../services/alarmEngine';
 import { getDb } from '../services/database';
+import { ringUi } from '../services/ringFlow';
 import { useApp } from '../state/AppProvider';
 import { Button, FadeIn, Row, Text } from '../ui/components';
 import { radius, space, useTheme } from '../ui/theme';
@@ -24,6 +26,19 @@ export default function Welcome() {
   const [event, setEvent] = useState<WakeEvent | null>(null);
   const [streak, setStreak] = useState(0);
   const now = new Date();
+
+  // Another alarm may have started while the previous challenge was solved.
+  useEffect(() => {
+    const id = setTimeout(() => {
+      void getActiveRing().then((r) => {
+        if (r && !ringUi.open) {
+          ringUi.open = true;
+          router.push('/ring');
+        }
+      });
+    }, 800);
+    return () => clearTimeout(id);
+  }, []);
 
   useEffect(() => {
     void (async () => {

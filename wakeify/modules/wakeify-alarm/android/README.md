@@ -56,6 +56,14 @@ the file name ends in `Package.kt` and it imports
   `START_REDELIVER_INTENT` and resumes the persisted ring (same `startedAt`).
 - The ring notification has no dismiss/stop action. If it is swiped away
   (Android 14+ allows that), it is re-posted via its delete intent.
+- **Snooze `scheduledFor`**: a snooze ring reports the ORIGINAL occurrence time
+  as `ActiveRing.scheduledFor` / event `scheduledFor` (JS matches the session by
+  it). `scheduleSnooze` derives it from the active ring of that alarm (else the
+  last fired occurrence, else the snooze time) and persists it with the snooze
+  (`snoozeOrigins`), so it survives reboots. Snooze bookkeeping itself is keyed
+  by the snooze trigger time.
+- **`ActiveRing.isTest`**: true for rings started by `scheduleTestRing`
+  (FireKind.TEST); stored in the ActiveRing JSON, missing -> false.
 - Ring activity intent: the app's launch activity with data
   `wakeify://ring?alarmId=<id>` and extra `wakeify_ring=true`.
 

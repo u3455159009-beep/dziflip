@@ -31,14 +31,24 @@ protocol WakeifyEngine: AnyObject {
 
 enum WakeifyEngineSupport {
   /// Stores new specs (if given), drops expired snoozes/test rings and state of
-  /// alarms that no longer exist.
-  static func applySpecs(_ specs: [AlarmSpec]?, to state: inout PersistedState, now: Date) {
+  /// alarms that no longer exist. A snooze is kept after it fired until its
+  /// ring window (`ringWindow`, engine specific) is over, because its
+  /// backups/bursts and the "snoozed" status of the original occurrence
+  /// depend on it.
+  static func applySpecs(_ specs: [AlarmSpec]?, to state: inout PersistedState, now: Date,
+                         ringWindow: (AlarmSpec) -> TimeInterval) {
     if let specs {
       state.specs = specs
     }
     let ids = Set(state.specs.map(\.id))
     let nowMs = epochMs(now)
-    state.snoozes = state.snoozes.filter { ids.contains($0.key) && $0.value > nowMs }
+    let handled = state.handledOccurrences
+    let specsById = Dictionary(state.specs.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+    state.snoozes = state.snoozes.filter { alarmId, snooze in
+      guard let spec = specsById[alarmId], spec.enabled else { return false }
+      if (handled[alarmId] ?? 0) >= snooze.occurrence { return false }
+      return snooze.triggerAt + max(ringWindow(spec), 60) * 1000 > nowMs
+    }
     state.testRings = state.testRings.filter { ids.contains($0.key) && $0.value > nowMs }
     state.handledOccurrences = state.handledOccurrences.filter { ids.contains($0.key) }
   }
@@ -103,13 +113,16 @@ enum WakeifyIntentBridge {
       if scheduledFor <= 0 { scheduledFor = epochMs(now) }
       let existing = state.activeRing.flatMap { $0.alarmId == alarmId ? $0 : nil }
       let usingFallback = state.systemAlarms.values.first { $0.alarmId == alarmId }?.usingFallbackSound ?? false
+      let isSnooze = kind == SystemAlarmKind.snooze.rawValue
+      let reported = existing.map { $0.isSnooze == isSnooze ? $0.scheduledFor : scheduledFor } ?? scheduledFor
       let record = ActiveRingRecord(
         alarmId: alarmId,
-        startedAt: existing?.startedAt ?? epochMs(now),
-        scheduledFor: existing?.scheduledFor ?? scheduledFor,
-        isSnooze: kind == SystemAlarmKind.snooze.rawValue,
+        startedAt: (existing?.isSnooze == isSnooze ? existing?.startedAt : nil) ?? epochMs(now),
+        scheduledFor: reported,
+        isSnooze: isSnooze,
+        isTest: kind == SystemAlarmKind.test.rawValue,
         usingFallbackSound: usingFallback,
-        expiresAt: state.expiry(for: alarmId, scheduledFor: existing?.scheduledFor ?? scheduledFor)
+        expiresAt: state.expiry(for: alarmId, scheduledFor: reported, isSnooze: isSnooze)
       )
       state.pendingRing = record
       return record

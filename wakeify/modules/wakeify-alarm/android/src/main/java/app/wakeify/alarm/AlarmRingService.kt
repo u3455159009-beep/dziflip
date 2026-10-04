@@ -81,6 +81,7 @@ class AlarmRingService : Service() {
     }
     val scheduledFor = intent.getLongExtra(AlarmIntents.EXTRA_SCHEDULED_FOR, System.currentTimeMillis())
     val isSnooze = intent.getBooleanExtra(AlarmIntents.EXTRA_IS_SNOOZE, false)
+    val isTest = intent.getBooleanExtra(AlarmIntents.EXTRA_IS_TEST, false)
     val spec = store.getSpec(alarmId) ?: AlarmSpec.fallback(alarmId)
 
     // Call startForeground immediately (5 s deadline), before any slow work.
@@ -88,7 +89,10 @@ class AlarmRingService : Service() {
 
     val persisted = store.getActiveRing()
     val isRedelivery = (flags and START_FLAG_REDELIVERY) != 0
-    val sameRing = current?.let { it.alarmId == alarmId && it.scheduledFor == scheduledFor } ?: false
+    // A snooze shares scheduledFor with its original occurrence, so compare the kind too.
+    val sameRing = current?.let {
+      it.alarmId == alarmId && it.scheduledFor == scheduledFor && it.isSnooze == isSnooze && it.isTest == isTest
+    } ?: false
     if (sameRing) return START_REDELIVER_INTENT // duplicate start for the ring already playing
 
     current?.let { old ->
@@ -99,7 +103,8 @@ class AlarmRingService : Service() {
 
     // Process was killed and the system redelivered the start intent: resume the
     // persisted ring (keep startedAt so the timeout still counts from the start).
-    val resume = persisted != null && isRedelivery && persisted.alarmId == alarmId && persisted.scheduledFor == scheduledFor
+    val resume = persisted != null && isRedelivery && persisted.alarmId == alarmId &&
+      persisted.scheduledFor == scheduledFor && persisted.isSnooze == isSnooze && persisted.isTest == isTest
     if (isRedelivery && !resume) {
       // The ring was stopped/handled while our process was dead: do not ring again.
       // stopSelf(startId) only stops if no newer start command is pending.
@@ -123,7 +128,7 @@ class AlarmRingService : Service() {
     val usingFallback = startPlayback(spec)
     if (spec.vibrate) startVibration()
 
-    val ring = ActiveRing(alarmId, startedAt, scheduledFor, isSnooze, usingFallback)
+    val ring = ActiveRing(alarmId, startedAt, scheduledFor, isSnooze, usingFallback, isTest)
     current = ring
     store.setActiveRing(ring)
     handler.removeCallbacks(timeoutRunnable)
@@ -500,12 +505,13 @@ class AlarmRingService : Service() {
 
     fun isRunning(): Boolean = instance?.current != null
 
-    fun start(context: Context, alarmId: String, scheduledFor: Long, isSnooze: Boolean) {
+    fun start(context: Context, alarmId: String, scheduledFor: Long, isSnooze: Boolean, isTest: Boolean) {
       val intent = Intent(context, AlarmRingService::class.java)
         .setAction(ACTION_START)
         .putExtra(AlarmIntents.EXTRA_ALARM_ID, alarmId)
         .putExtra(AlarmIntents.EXTRA_SCHEDULED_FOR, scheduledFor)
         .putExtra(AlarmIntents.EXTRA_IS_SNOOZE, isSnooze)
+        .putExtra(AlarmIntents.EXTRA_IS_TEST, isTest)
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
         context.startForegroundService(intent)
       } else {
@@ -579,11 +585,11 @@ class AlarmRingService : Service() {
     }
 
     /** Used when the foreground service cannot be started at all. */
-    fun postFallbackNotification(context: Context, alarmId: String, scheduledFor: Long, isSnooze: Boolean) {
+    fun postFallbackNotification(context: Context, alarmId: String, scheduledFor: Long, isSnooze: Boolean, isTest: Boolean) {
       try {
         val store = AlarmStore.get(context)
         // Persist the ring so the app shows the challenge screen when opened.
-        store.setActiveRing(ActiveRing(alarmId, System.currentTimeMillis(), scheduledFor, isSnooze, usingFallbackSound = true))
+        store.setActiveRing(ActiveRing(alarmId, System.currentTimeMillis(), scheduledFor, isSnooze, usingFallbackSound = true, isTest = isTest))
         val label = store.getSpec(alarmId)?.label ?: "Alarm"
         (context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
           .notify(NOTIFICATION_ID, buildRingNotification(context, alarmId, label, withSound = true))

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { defaultPlan } from './rotation';
-import { canSnooze, continuesSession, reconcile, snoozesLeft, type RingSession } from './ringSession';
+import { canSnooze, continuesSession, reconcile, ringWindowMs, shouldShowRing, snoozesLeft, wakeEventId, type RingSession } from './ringSession';
 import type { Alarm, WakeEvent } from './types';
 
 process.env.TZ = 'Europe/Prague';
@@ -59,29 +59,45 @@ describe('snooze rules', () => {
   });
 });
 
+describe('snooze gating & ids', () => {
+  const s: RingSession = { eventId: 'e', alarmId: 'a1', scheduledFor: t(5, 7), firstRingAt: t(5, 7), snoozeCount: 1, challengeStartedAt: null, snoozedUntil: t(5, 7, 10) };
+  it('ignores stale rings of the snoozed occurrence until the snooze ends', () => {
+    expect(shouldShowRing(s, { alarmId: 'a1', scheduledFor: t(5, 7), isSnooze: false }, t(5, 7, 5))).toBe(false);
+    expect(shouldShowRing(s, { alarmId: 'a1', scheduledFor: t(5, 7), isSnooze: true }, t(5, 7, 5))).toBe(true);
+    expect(shouldShowRing(s, { alarmId: 'a1', scheduledFor: t(5, 7), isSnooze: false }, t(5, 7, 11))).toBe(true);
+    expect(shouldShowRing(s, { alarmId: 'b', scheduledFor: t(5, 7), isSnooze: false }, t(5, 7, 5))).toBe(true);
+    expect(shouldShowRing(null, { alarmId: 'a1', scheduledFor: t(5, 7), isSnooze: false }, t(5, 7, 5))).toBe(true);
+  });
+  it('event ids are deterministic per occurrence', () => {
+    expect(wakeEventId('a', t(5, 7))).toBe(wakeEventId('a', t(5, 7) + 20_000));
+    expect(wakeEventId('a', t(5, 7))).not.toBe(wakeEventId('a', t(6, 7)));
+    expect(ringWindowMs({ maxRingMinutes: 30, backupRepeatMinutes: 1, backupCount: 10 })).toBe(40 * 60000);
+  });
+});
+
 describe('reconcile', () => {
   it('reports unhandled past occurrences as missed', () => {
-    const r = reconcile([alarm()], [event(t(3, 7))], t(2, 12), t(5, 12), 30, null);
+    const r = reconcile([alarm()], [event(t(3, 7))], t(2, 12), t(5, 12), 30 * 60000, null);
     expect(r.missed.map((m) => new Date(m.scheduledFor).getDate())).toEqual([4, 5]);
     expect(r.expiredOneShots).toEqual([]);
   });
   it('does not report an occurrence that is still within the ring window', () => {
-    const r = reconcile([alarm()], [], t(5, 6), t(5, 7, 10), 30, null);
+    const r = reconcile([alarm()], [], t(5, 6), t(5, 7, 10), 30 * 60000, null);
     expect(r.missed).toEqual([]);
   });
   it('does not report the occurrence of the active session', () => {
     const s: RingSession = { eventId: 'e', alarmId: 'a1', scheduledFor: t(5, 7), firstRingAt: t(5, 7), snoozeCount: 2, challengeStartedAt: null };
-    expect(reconcile([alarm()], [], t(5, 6), t(5, 9), 30, s).missed).toEqual([]);
+    expect(reconcile([alarm()], [], t(5, 6), t(5, 9), 30 * 60000, s).missed).toEqual([]);
   });
   it('ignores occurrences before the alarm was last edited and disabled alarms', () => {
-    expect(reconcile([alarm({ updatedAt: t(5, 8) })], [], t(1, 0), t(5, 12), 30, null).missed).toEqual([]);
-    expect(reconcile([alarm({ enabled: false })], [], t(1, 0), t(5, 12), 30, null).missed).toEqual([]);
+    expect(reconcile([alarm({ updatedAt: t(5, 8) })], [], t(1, 0), t(5, 12), 30 * 60000, null).missed).toEqual([]);
+    expect(reconcile([alarm({ enabled: false })], [], t(1, 0), t(5, 12), 30 * 60000, null).missed).toEqual([]);
   });
   it('expires one-shot alarms after their occurrence', () => {
     const one = alarm({ weekdays: [], updatedAt: t(4, 22) });
-    const r = reconcile([one], [event(t(5, 7))], t(4, 22), t(5, 8), 30, null);
+    const r = reconcile([one], [event(t(5, 7))], t(4, 22), t(5, 8), 30 * 60000, null);
     expect(r.expiredOneShots).toEqual(['a1']);
     expect(r.missed).toEqual([]);
-    expect(reconcile([one], [], t(4, 22), t(5, 6), 30, null).expiredOneShots).toEqual([]);
+    expect(reconcile([one], [], t(4, 22), t(5, 6), 30 * 60000, null).expiredOneShots).toEqual([]);
   });
 });

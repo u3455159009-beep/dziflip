@@ -11,7 +11,7 @@ import { MathChallenge } from '../components/challenges/MathChallenge';
 import { PhotoChallenge } from '../components/challenges/PhotoChallenge';
 import { QrChallenge } from '../components/challenges/QrChallenge';
 import { StepsChallenge } from '../components/challenges/StepsChallenge';
-import { canSnooze, snoozesLeft, type RingSession } from '../domain/ringSession';
+import { canSnooze, shouldShowRing, snoozesLeft, type RingSession } from '../domain/ringSession';
 import { kindLabel, resolveChallenge, stepLabel } from '../domain/rotation';
 import { formatTime } from '../domain/schedule';
 import type { Alarm, Challenge, ChallengeKind, ChallengeStep } from '../domain/types';
@@ -24,10 +24,18 @@ import {
 } from '../services/alarmEngine';
 import { RingPlayer } from '../services/audio';
 import { getDb } from '../services/database';
-import { beginRing, complete, markChallengeStarted, snooze } from '../services/ringFlow';
+import { abandon, beginRing, complete, finishTestRing, getSession, markChallengeStarted, ringUi, snooze } from '../services/ringFlow';
 import { useApp } from '../state/AppProvider';
 import { Button, Row, Text } from '../ui/components';
 import { radius, space, useTheme } from '../ui/theme';
+
+async function getSessionSafe(db: Awaited<ReturnType<typeof getDb>>) {
+  try {
+    return await getSession(db);
+  } catch {
+    return null;
+  }
+}
 
 /** Replacement when a step can't be done (camera denied, code lost, no sensor): harder maths. */
 const ALTERNATIVE: ChallengeStep = { kind: 'math', count: 5, difficulty: 'hard' };
@@ -42,7 +50,10 @@ export default function Ring() {
   const t = useTheme();
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ demo?: string; alarmId?: string }>();
+  const [isTest, setIsTest] = useState(false);
   const demo = params.demo === '1';
+  /** Demo (from settings) and test rings exercise the UI but leave no trace in history. */
+  const dryRun = demo || isTest;
   const app = useApp();
   const [phase, setPhase] = useState<Phase>({ kind: 'loading' });
   const [alarm, setAlarm] = useState<Alarm | null>(null);
@@ -60,12 +71,14 @@ export default function Ring() {
 
   // Block the hardware back button while ringing.
   useEffect(() => {
+    ringUi.open = true;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => true);
     setShowOverLockScreen(true);
     // Screen stays on while ringing / solving the challenge.
     const awake = activateKeepAwakeAsync('wakeify-ring').catch(() => {});
     const p = player.current;
     return () => {
+      ringUi.open = false;
       sub.remove();
       setShowOverLockScreen(false);
       p.stop();
@@ -81,8 +94,9 @@ export default function Ring() {
       const db = await getDb();
       let ring = await getActiveRing();
       if (!ring && demo && params.alarmId) {
-        ring = { alarmId: params.alarmId, startedAt: Date.now(), scheduledFor: Date.now(), isSnooze: false, usingFallbackSound: false };
+        ring = { alarmId: params.alarmId, startedAt: Date.now(), scheduledFor: Date.now(), isSnooze: false, isTest: false, usingFallbackSound: false };
       }
+      if (ring && !demo && !shouldShowRing(await getSessionSafe(db), ring, Date.now())) ring = null;
       const a = ring ? app.alarms.find((x) => x.id === ring!.alarmId) ?? null : null;
       if (!alive) return;
       if (!ring || !a) {
@@ -90,9 +104,12 @@ export default function Ring() {
         setPhase({ kind: 'idle' });
         return;
       }
-      const s = demo
-        ? { eventId: 'demo', alarmId: a.id, scheduledFor: ring.scheduledFor, firstRingAt: ring.startedAt, snoozeCount: 0, challengeStartedAt: null }
-        : await beginRing(db, a, ring);
+      const testRing = !demo && ring.isTest === true;
+      setIsTest(testRing);
+      const s: RingSession =
+        demo || testRing
+          ? { eventId: 'dry-run', alarmId: a.id, scheduledFor: ring.scheduledFor, firstRingAt: ring.startedAt, snoozeCount: 0, challengeStartedAt: null }
+          : await beginRing(db, a, ring);
       const ch = resolveChallenge(a.plan, a.id, new Date(s.scheduledFor));
       if (!alive) return;
       setAlarm(a);
@@ -120,9 +137,12 @@ export default function Ring() {
       onRingStopped((e) => {
         if (e.reason === 'timeout' && !finished.current) {
           player.current.stop();
+          void getDb().then(abandon);
+          app.historyChanged();
           router.replace('/');
         }
       }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
 
@@ -132,7 +152,8 @@ export default function Ring() {
     if (!alarm || !session || finished.current) return;
     finished.current = true;
     player.current.stop();
-    if (demo) {
+    if (dryRun) {
+      if (isTest) await finishTestRing(alarm.id);
       router.replace('/welcome?demo=1');
       return;
     }
@@ -145,17 +166,18 @@ export default function Ring() {
     if (alarm.weekdays.length === 0) await app.setAlarmEnabled(alarm.id, false);
     else void app.resync();
     router.replace(`/welcome?eventId=${ev.id}`);
-  }, [alarm, session, steps, demo, fallbackUsed, app]);
+  }, [alarm, session, steps, dryRun, isTest, fallbackUsed, app]);
 
   const startChallenge = async () => {
-    if (session && !demo) setSession(await markChallengeStarted(await getDb(), session));
+    if (session && !dryRun) setSession(await markChallengeStarted(await getDb(), session));
     if (steps.length === 0) void finish();
     else setPhase({ kind: 'challenge', index: 0 });
   };
 
-  const nextStep = useCallback(() => {
+  /** Advances only if `fromIndex` is still the current step (double-callbacks can't skip a step). */
+  const nextStep = useCallback((fromIndex: number) => {
     setPhase((p) => {
-      if (p.kind !== 'challenge') return p;
+      if (p.kind !== 'challenge' || p.index !== fromIndex) return p;
       if (p.index + 1 >= steps.length) {
         void finish();
         return p;
@@ -174,7 +196,8 @@ export default function Ring() {
   const doSnooze = async () => {
     if (!alarm || !session) return;
     player.current.stop();
-    if (demo) {
+    if (dryRun) {
+      if (isTest) await finishTestRing(alarm.id);
       router.replace('/');
       return;
     }
@@ -217,7 +240,7 @@ export default function Ring() {
       <LinearGradient colors={gradient} style={{ flex: 1, paddingTop: insets.top + space.xxl, paddingBottom: insets.bottom + space.xl, paddingHorizontal: space.xl }}>
         <View style={{ flex: 1, alignItems: 'center', gap: space.md }}>
           <Text variant="overline" color="rgba(255,255,255,0.75)">
-            {demo ? 'Ukázka zvonění' : session.snoozeCount > 0 ? `Po ${session.snoozeCount}. odložení` : 'Dobré ráno'}
+            {demo ? 'Ukázka zvonění' : isTest ? 'Zkušební budík' : session.snoozeCount > 0 ? `Po ${session.snoozeCount}. odložení` : 'Dobré ráno'}
           </Text>
           <Text style={{ fontSize: 96, fontWeight: '200', color: '#FFFFFF', letterSpacing: -3, fontVariant: ['tabular-nums'] }} accessibilityRole="header">
             {formatTime(now.getHours(), now.getMinutes())}
@@ -275,18 +298,18 @@ export default function Ring() {
             </Text>
           </Row>
           <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', gap: space.lg }}>
-            {step.kind === 'none' && <HoldChallenge onDone={nextStep} />}
-            {step.kind === 'math' && <MathChallenge key={`${phase.index}-${step.difficulty}`} count={step.count} difficulty={step.difficulty} onDone={nextStep} />}
-            {step.kind === 'steps' && <StepsChallenge key={phase.index} target={step.steps} onDone={nextStep} onUnavailable={useAlternative} />}
+            {step.kind === 'none' && <HoldChallenge onDone={() => nextStep(phase.index)} />}
+            {step.kind === 'math' && <MathChallenge key={`${phase.index}-${step.difficulty}`} count={step.count} difficulty={step.difficulty} onDone={() => nextStep(phase.index)} />}
+            {step.kind === 'steps' && <StepsChallenge key={phase.index} target={step.steps} onDone={() => nextStep(phase.index)} onUnavailable={useAlternative} />}
             {step.kind === 'qr' && (
-              <QrChallenge key={phase.index} target={app.qrTargets.find((q) => q.id === step.qrTargetId)} onDone={nextStep} onAlternative={useAlternative} />
+              <QrChallenge key={phase.index} target={app.qrTargets.find((q) => q.id === step.qrTargetId)} onDone={() => nextStep(phase.index)} onAlternative={useAlternative} />
             )}
             {step.kind === 'photo' && (
               <PhotoChallenge
                 key={phase.index}
                 target={app.photoTargets.find((p) => p.id === step.photoTargetId)}
                 strictness={step.strictness}
-                onDone={nextStep}
+                onDone={() => nextStep(phase.index)}
                 onAlternative={useAlternative}
               />
             )}

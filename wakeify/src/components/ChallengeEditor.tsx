@@ -71,7 +71,9 @@ export function challengeProblems(c: Challenge, qrIds: Set<string>, photoIds: Se
 
 export function planProblems(p: ChallengePlan, qrIds: Set<string>, photoIds: Set<string>): string[] {
   const list: Challenge[] =
-    p.mode === 'fixed' ? [p.challenge] : p.mode === 'weekday' ? Object.values(p.weekdayPlan).filter(Boolean) as Challenge[] : p.pool;
+    p.mode === 'fixed' ? [p.challenge] : p.mode === 'weekday'
+      ? [...(Object.values(p.weekdayPlan).filter(Boolean) as Challenge[]), ...(Object.keys(p.weekdayPlan).length < 7 ? [p.challenge] : [])]
+      : p.pool;
   if (p.mode !== 'fixed' && p.mode !== 'weekday' && p.pool.length < 2) return ['Rotace potřebuje alespoň 2 úkoly.'];
   if (p.mode === 'weekday' && list.length === 0) return ['Týdenní plán je prázdný — vytvoř ho automaticky nebo nastav dny.'];
   return [...new Set(list.flatMap((c) => challengeProblems(c, qrIds, photoIds)))];

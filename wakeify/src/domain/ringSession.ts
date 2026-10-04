@@ -15,7 +15,35 @@ export type RingSession = {
   snoozeCount: number;
   /** When the user started the challenge in this session (for stats). */
   challengeStartedAt: number | null;
+  /** Epoch ms the current snooze ends; rings of the same occurrence before it are ignored. */
+  snoozedUntil?: number | null;
 };
+
+/** Deterministic id → one wake event per (alarm, occurrence), whoever writes it first. */
+export function wakeEventId(alarmId: string, scheduledFor: number): string {
+  return `${alarmId}@${Math.round(scheduledFor / 60000)}`;
+}
+
+/**
+ * Whether a reported ring should open the ring screen. While a snooze is
+ * pending, a non-snooze report of the same occurrence (stale persisted ring,
+ * backup re-alarm) is ignored.
+ */
+export function shouldShowRing(
+  session: RingSession | null,
+  ring: { alarmId: string; scheduledFor: number; isSnooze: boolean },
+  now: number,
+): boolean {
+  if (!session?.snoozedUntil || ring.isSnooze) return true;
+  if (session.alarmId !== ring.alarmId) return true;
+  if (Math.abs(ring.scheduledFor - session.scheduledFor) >= 60_000) return true;
+  return now >= session.snoozedUntil;
+}
+
+/** How long after an occurrence the native engines may still report it as ringing. */
+export function ringWindowMs(s: { maxRingMinutes: number; backupRepeatMinutes: number; backupCount: number }): number {
+  return (s.maxRingMinutes + s.backupRepeatMinutes * s.backupCount) * 60000;
+}
 
 export function canSnooze(alarm: Pick<Alarm, 'maxSnoozes'>, session: Pick<RingSession, 'snoozeCount'>): boolean {
   return alarm.maxSnoozes > 0 && session.snoozeCount < alarm.maxSnoozes;
@@ -59,12 +87,12 @@ export function reconcile(
   events: WakeEvent[],
   sinceMs: number,
   nowMs: number,
-  maxRingMinutes: number,
+  windowMs: number,
   activeSession: RingSession | null,
 ): Reconciliation {
   const missed: Reconciliation['missed'] = [];
   const expiredOneShots: string[] = [];
-  const settled = nowMs - maxRingMinutes * 60000; // occurrences still ringing are not "missed" yet
+  const settled = nowMs - windowMs; // occurrences that may still be ringing are not "missed" yet
   for (const alarm of alarms) {
     if (!alarm.enabled) continue;
     const from = Math.max(sinceMs, alarm.updatedAt, nowMs - MAX_LOOKBACK_MS);

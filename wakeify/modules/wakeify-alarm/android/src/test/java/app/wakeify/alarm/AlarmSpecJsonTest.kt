@@ -66,6 +66,20 @@ class AlarmSpecJsonTest {
   fun activeRingRoundTrip() {
     val r = ActiveRing("a", 1_790_000_000_000L, 1_789_999_990_000L, isSnooze = true, usingFallbackSound = true)
     assertEquals(r, ActiveRing.fromJson(JSONObject(r.toJson().toString())))
+    val t = ActiveRing("b", 1L, 2L, isSnooze = false, usingFallbackSound = false, isTest = true)
+    val back = ActiveRing.fromJson(JSONObject(t.toJson().toString()))
+    assertEquals(t, back)
+    assertTrue(back.isTest)
+  }
+
+  @Test
+  fun activeRingLegacyJsonWithoutIsTest() {
+    // Written by a version before isTest existed -> defaults to false.
+    val legacy = """{"alarmId":"a","startedAt":10,"scheduledFor":5,"isSnooze":true,"usingFallbackSound":false}"""
+    val r = ActiveRing.fromJson(JSONObject(legacy))
+    assertFalse(r.isTest)
+    assertTrue(r.isSnooze)
+    assertEquals(5L, r.scheduledFor)
   }
 
   @Test

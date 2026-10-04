@@ -55,21 +55,22 @@ open class AlarmReceiver : BroadcastReceiver() {
   private fun handleFire(context: Context, intent: Intent) {
     val alarmId = intent.getStringExtra(AlarmIntents.EXTRA_ALARM_ID) ?: return
     val scheduledFor = intent.getLongExtra(AlarmIntents.EXTRA_SCHEDULED_FOR, System.currentTimeMillis())
+    val triggerAt = intent.getLongExtra(AlarmIntents.EXTRA_TRIGGER_AT, scheduledFor)
     val kind = FireKind.from(intent.getStringExtra(AlarmIntents.EXTRA_KIND))
     val scheduler = AlarmScheduler(context)
     val ring = scheduler.shouldRing(alarmId, kind)
     if (ring) {
       // Start ringing first — rescheduling must never delay or prevent the ring.
       try {
-        AlarmRingService.start(context, alarmId, scheduledFor, kind == FireKind.SNOOZE)
+        AlarmRingService.start(context, alarmId, scheduledFor, kind == FireKind.SNOOZE, kind == FireKind.TEST)
       } catch (e: Exception) {
         Log.e(TAG, "Could not start ring service for $alarmId", e)
-        AlarmRingService.postFallbackNotification(context, alarmId, scheduledFor, kind == FireKind.SNOOZE)
+        AlarmRingService.postFallbackNotification(context, alarmId, scheduledFor, kind == FireKind.SNOOZE, kind == FireKind.TEST)
       }
     } else {
       Log.w(TAG, "Ignoring stale FIRE for $alarmId (deleted or disabled)")
     }
-    scheduler.onFired(alarmId, scheduledFor, kind, zone = currentZone(null))
+    scheduler.onFired(alarmId, scheduledFor, kind, triggerAt, zone = currentZone(null))
   }
 
   private fun currentZone(intent: Intent?): ZoneId {

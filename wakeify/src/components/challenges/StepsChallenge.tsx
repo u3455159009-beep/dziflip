@@ -18,6 +18,10 @@ export function StepsChallenge({ target, onDone, onUnavailable }: { target: numb
   const [steps, setSteps] = useState(0);
   const [source, setSource] = useState<Source>('loading');
   const done = useRef(false);
+  // Parent callbacks change identity on every app-state update; keep the
+  // sensor subscription (and its step count) alive across those renders.
+  const onDoneRef = useRef(onDone);
+  onDoneRef.current = onDone;
 
   useEffect(() => {
     let cleanup: (() => void) | null = null;
@@ -27,7 +31,7 @@ export function StepsChallenge({ target, onDone, onUnavailable }: { target: numb
       setSteps(n);
       if (n >= target && !done.current) {
         done.current = true;
-        onDone();
+        onDoneRef.current();
       }
     };
     (async () => {
@@ -61,7 +65,7 @@ export function StepsChallenge({ target, onDone, onUnavailable }: { target: numb
       alive = false;
       cleanup?.();
     };
-  }, [target, onDone]);
+  }, [target]);
 
   if (source === 'none') {
     return (

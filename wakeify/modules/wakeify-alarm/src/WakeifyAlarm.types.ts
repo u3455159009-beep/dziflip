@@ -58,6 +58,8 @@ export type ActiveRing = {
   /** Epoch ms of the scheduled occurrence that fired. */
   scheduledFor: number;
   isSnooze: boolean;
+  /** True for rings started by scheduleTestRing — not recorded in history, never disables the alarm. */
+  isTest: boolean;
   /** True when the user's track could not be played and the system tone is used. */
   usingFallbackSound: boolean;
 };

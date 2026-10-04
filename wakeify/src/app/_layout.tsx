@@ -6,7 +6,10 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import { AppState, useColorScheme } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { shouldShowRing } from '../domain/ringSession';
 import { getActiveRing, onRingStarted } from '../services/alarmEngine';
+import { getDb } from '../services/database';
+import { getSession, ringUi } from '../services/ringFlow';
 import { AppProvider, useApp } from '../state/AppProvider';
 import { ThemeContext, dark, light } from '../ui/theme';
 
@@ -47,12 +50,14 @@ function RingWatcher() {
     if (!ready) return;
     const check = async () => {
       const ring = await getActiveRing();
-      if (ring && pathRef.current !== '/ring') router.push('/ring');
+      if (!ring || ringUi.open || pathRef.current === '/ring') return;
+      const session = await getSession(await getDb());
+      if (!shouldShowRing(session, ring, Date.now())) return;
+      ringUi.open = true; // set synchronously: event + check can race
+      router.push('/ring');
     };
     void check();
-    const offRing = onRingStarted(() => {
-      if (pathRef.current !== '/ring') router.push('/ring');
-    });
+    const offRing = onRingStarted(() => void check());
     const sub = AppState.addEventListener('change', (s) => {
       if (s === 'active') void check();
     });

@@ -116,6 +116,19 @@ struct SystemAlarmRecord: Codable {
   var hour: Int
   var minute: Int
   var usingFallbackSound: Bool
+  /// True for the snooze alarm and the backups armed after it (ring reports
+  /// `isSnooze`). Optional so records persisted before this field decode.
+  var fromSnooze: Bool? = nil
+}
+
+/// A snoozed occurrence: rings again at `triggerAt`, but is still reported
+/// with `scheduledFor = occurrence` (the ORIGINAL occurrence) so JS can match
+/// the ring session.
+struct SnoozeRecord: Codable, Equatable {
+  /// Epoch ms the snooze rings.
+  var triggerAt: Double
+  /// Epoch ms of the original occurrence that was snoozed.
+  var occurrence: Double
 }
 
 struct ActiveRingRecord: Codable, Equatable {
@@ -123,6 +136,8 @@ struct ActiveRingRecord: Codable, Equatable {
   var startedAt: Double
   var scheduledFor: Double
   var isSnooze: Bool
+  /// True when the ring comes from scheduleTestRing.
+  var isTest: Bool
   var usingFallbackSound: Bool
   /// Epoch ms after which the record is considered stale.
   var expiresAt: Double
@@ -133,8 +148,24 @@ struct ActiveRingRecord: Codable, Equatable {
       "startedAt": startedAt,
       "scheduledFor": scheduledFor,
       "isSnooze": isSnooze,
+      "isTest": isTest,
       "usingFallbackSound": usingFallbackSound,
     ]
+  }
+}
+
+extension ActiveRingRecord {
+  // Custom decoding (in an extension to keep the memberwise init) so rings
+  // persisted before `isTest` existed still decode.
+  init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    alarmId = try c.decode(String.self, forKey: .alarmId)
+    startedAt = try c.decode(Double.self, forKey: .startedAt)
+    scheduledFor = try c.decode(Double.self, forKey: .scheduledFor)
+    isSnooze = try c.decode(Bool.self, forKey: .isSnooze)
+    isTest = try c.decodeIfPresent(Bool.self, forKey: .isTest) ?? false
+    usingFallbackSound = try c.decode(Bool.self, forKey: .usingFallbackSound)
+    expiresAt = try c.decode(Double.self, forKey: .expiresAt)
   }
 }
 

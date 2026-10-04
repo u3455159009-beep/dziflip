@@ -49,7 +49,17 @@ class AlarmStore private constructor(private val prefs: SharedPreferences) {
   fun putSnooze(id: String, triggerAt: Long) = editLongMap(KEY_SNOOZES) { it[id] = triggerAt }
 
   @Synchronized
-  fun removeSnooze(id: String) = editLongMap(KEY_SNOOZES) { it.remove(id) }
+  fun removeSnooze(id: String) {
+    editLongMap(KEY_SNOOZES) { it.remove(id) }
+    editLongMap(KEY_SNOOZE_ORIGINS) { it.remove(id) }
+  }
+
+  /** Original occurrence (scheduledFor) each pending snooze belongs to. */
+  @Synchronized
+  fun getSnoozeOrigin(id: String): Long? = readLongMap(KEY_SNOOZE_ORIGINS)[id]
+
+  @Synchronized
+  fun putSnoozeOrigin(id: String, scheduledFor: Long) = editLongMap(KEY_SNOOZE_ORIGINS) { it[id] = scheduledFor }
 
   /** Last trigger instant handed to AlarmManager for each regular alarm. */
   @Synchronized
@@ -148,6 +158,7 @@ class AlarmStore private constructor(private val prefs: SharedPreferences) {
     private const val PREFS = "wakeify_alarm_store"
     private const val KEY_SPECS = "specs"
     private const val KEY_SNOOZES = "snoozes"
+    private const val KEY_SNOOZE_ORIGINS = "snoozeOrigins"
     private const val KEY_TRIGGERS = "scheduledTriggers"
     private const val KEY_FIRED = "fired"
     private const val KEY_ACTIVE_RING = "activeRing"

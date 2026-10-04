@@ -23,6 +23,9 @@ object AlarmIntents {
   const val EXTRA_ALARM_ID = "alarmId"
   const val EXTRA_SCHEDULED_FOR = "scheduledFor"
   const val EXTRA_IS_SNOOZE = "isSnooze"
+  const val EXTRA_IS_TEST = "isTest"
+  /** Instant the PendingIntent was set for (differs from scheduledFor for snoozes / recovery). */
+  const val EXTRA_TRIGGER_AT = "triggerAt"
   const val EXTRA_KIND = "kind"
 
   /** Extra put on the activity intent that opens the ring screen. */
@@ -44,11 +47,17 @@ object AlarmIntents {
       .setAction(ACTION_FIRE)
       .setData(Uri.Builder().scheme("wakeify-alarm").authority(kind.key).appendPath(alarmId).build())
 
-  fun firePendingIntent(context: Context, kind: FireKind, alarmId: String, scheduledFor: Long): PendingIntent {
+  /**
+   * [scheduledFor] = the occurrence this ring belongs to (for a snooze: the ORIGINAL
+   * occurrence, which JS uses to match the session); [triggerAt] = when it fires.
+   */
+  fun firePendingIntent(context: Context, kind: FireKind, alarmId: String, scheduledFor: Long, triggerAt: Long): PendingIntent {
     val intent = fireIntent(context, kind, alarmId)
       .putExtra(EXTRA_ALARM_ID, alarmId)
       .putExtra(EXTRA_SCHEDULED_FOR, scheduledFor)
+      .putExtra(EXTRA_TRIGGER_AT, triggerAt)
       .putExtra(EXTRA_IS_SNOOZE, kind == FireKind.SNOOZE)
+      .putExtra(EXTRA_IS_TEST, kind == FireKind.TEST)
       .putExtra(EXTRA_KIND, kind.key)
     return PendingIntent.getBroadcast(context, requestCode(kind, alarmId), intent, PI_FLAGS)
   }

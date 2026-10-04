@@ -115,6 +115,7 @@ export default function AlarmEditor() {
       Alert.alert('Ještě chvilku', problems.join('\n'));
       return;
     }
+    // Testing goes through the real native path, which needs the current settings synced.
     await app.saveAlarm({ ...a, enabled: existing?.enabled ?? true });
     const ok = await scheduleTestRing(a.id, 10).catch(() => false);
     Alert.alert(
@@ -266,7 +267,9 @@ export default function AlarmEditor() {
           </Text>
         )}
         <Button title="Uložit budík" icon="checkmark" loading={saving} onPress={save} />
-        {engineAvailable && <Button title="Vyzkoušet (zazvoní za 10 s)" kind="secondary" icon="play-circle-outline" onPress={test} />}
+        {engineAvailable && !isNew && (
+          <Button title="Uložit a vyzkoušet (za 10 s)" kind="secondary" icon="play-circle-outline" onPress={test} />
+        )}
         {!isNew && <Button title="Smazat budík" kind="danger" icon="trash-outline" onPress={remove} />}
       </Screen>
       <TrackPicker

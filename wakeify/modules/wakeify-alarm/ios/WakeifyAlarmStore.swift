@@ -17,8 +17,10 @@ struct PersistedState: Codable {
   var armedOccurrences: [String: [Double]] = [:]
   /// Latest occurrence (epoch ms) the user completed the challenge for.
   var handledOccurrences: [String: Double] = [:]
-  /// Pending snoozes, alarmId -> epoch ms.
-  var snoozes: [String: Double] = [:]
+  /// Snoozed occurrences, alarmId -> snooze. Kept after the snooze fired
+  /// until its ring window ends (its backups/bursts still need it) or the
+  /// occurrence is handled.
+  var snoozes: [String: SnoozeRecord] = [:]
   /// Pending test rings, alarmId -> epoch ms.
   var testRings: [String: Double] = [:]
   /// Ring currently in progress (observed through AlarmKit / notifications).
@@ -37,7 +39,8 @@ struct PersistedState: Codable {
     oneShotTargets = (try? c.decodeIfPresent([String: OneShotTarget].self, forKey: .oneShotTargets)) ?? [:]
     armedOccurrences = (try? c.decodeIfPresent([String: [Double]].self, forKey: .armedOccurrences)) ?? [:]
     handledOccurrences = (try? c.decodeIfPresent([String: Double].self, forKey: .handledOccurrences)) ?? [:]
-    snoozes = (try? c.decodeIfPresent([String: Double].self, forKey: .snoozes)) ?? [:]
+    // Pre-SnoozeRecord format ([String: Double]) fails to decode and is dropped.
+    snoozes = (try? c.decodeIfPresent([String: SnoozeRecord].self, forKey: .snoozes)) ?? [:]
     testRings = (try? c.decodeIfPresent([String: Double].self, forKey: .testRings)) ?? [:]
     activeRing = try? c.decodeIfPresent(ActiveRingRecord.self, forKey: .activeRing)
     pendingRing = try? c.decodeIfPresent(ActiveRingRecord.self, forKey: .pendingRing)
@@ -112,6 +115,7 @@ enum WakeifyIds {
   }
 
   static func snooze(_ alarmId: String) -> UUID { nameBased(alarmId + "snooze") }
+  static func snoozeBackup(_ alarmId: String, index: Int) -> UUID { nameBased(alarmId + "snoozebackup:\(index)") }
   static func test(_ alarmId: String) -> UUID { nameBased(alarmId + "test") }
   static func backup(_ alarmId: String, index: Int) -> UUID { nameBased(alarmId + "backup:\(index)") }
   static func skipFixed(_ alarmId: String, index: Int) -> UUID { nameBased(alarmId + "skip:\(index)") }
@@ -260,13 +264,16 @@ enum WakeifyPlanner {
       }
 
       // Occurrences that still need backups/bursts: earlier armed ones that
-      // are unhandled and inside their window, plus the next one.
+      // are unhandled, not snoozed and inside their window, plus the next
+      // one. A snoozed occurrence gets its backups relative to the snooze
+      // instead (scheduled by the engines from `state.snoozes`).
       let handled = state.handledOccurrences[spec.id] ?? 0
+      let snoozedUpTo = state.snoozes[spec.id]?.occurrence ?? 0
       let window = ringWindow(spec)
       var ring: [Date] = []
       for ms in state.armedOccurrences[spec.id] ?? [] {
         let occ = dateFromMs(ms)
-        guard occ <= now, ms > handled, occ.addingTimeInterval(window) > now,
+        guard occ <= now, ms > handled, ms > snoozedUpTo, occ.addingTimeInterval(window) > now,
               WakeifySchedule.matchesTimeOfDay(occ, hour: spec.hour, minute: spec.minute) else { continue }
         ring.append(occ)
       }
@@ -288,17 +295,68 @@ extension PersistedState {
   /// Drops stale ring records and returns the ring that is still relevant.
   mutating func currentRing(now: Date) -> ActiveRingRecord? {
     let nowMs = epochMs(now)
-    if let ring = activeRing, ring.expiresAt <= nowMs || (handledOccurrences[ring.alarmId] ?? 0) >= ring.scheduledFor {
+    if let ring = activeRing, ring.expiresAt <= nowMs || !isRingValid(ring, nowMs: nowMs) {
       activeRing = nil
     }
-    if let ring = pendingRing, ring.expiresAt <= nowMs || (handledOccurrences[ring.alarmId] ?? 0) >= ring.scheduledFor {
+    if let ring = pendingRing, ring.expiresAt <= nowMs || !isRingValid(ring, nowMs: nowMs) {
       pendingRing = nil
     }
     return activeRing ?? pendingRing
   }
 
-  func expiry(for alarmId: String, scheduledFor: Double) -> Double {
+  /// False when the ring's occurrence was handled, or when it is snoozed:
+  /// a snoozed occurrence only rings again as the snooze ring (`isSnooze`)
+  /// once the snooze time has come.
+  func isRingValid(_ ring: ActiveRingRecord, nowMs: Double) -> Bool {
+    if (handledOccurrences[ring.alarmId] ?? 0) >= ring.scheduledFor { return false }
+    if let snooze = snoozes[ring.alarmId], ring.scheduledFor <= snooze.occurrence {
+      if !ring.isSnooze { return false }
+      if snooze.triggerAt > nowMs + 60_000 { return false }
+    }
+    return true
+  }
+
+  /// Expiry of a ring record. Snooze rings are measured from the snooze time,
+  /// not from the original occurrence they report as `scheduledFor`.
+  func expiry(for alarmId: String, scheduledFor: Double, isSnooze: Bool = false) -> Double {
     let window = spec(for: alarmId)?.ringWindowSeconds ?? 30 * 60
-    return scheduledFor + window * 1000
+    var anchor = scheduledFor
+    if isSnooze, let snooze = snoozes[alarmId] {
+      anchor = max(anchor, snooze.triggerAt)
+    }
+    return anchor + window * 1000
+  }
+
+  /// Marks the current unhandled occurrence of `alarmId` as snoozed until
+  /// `triggerAt`: clears its active/pending ring so getActiveRing() returns
+  /// null until the snooze fires. `alerting` are rings derived from alarms or
+  /// notifications that are ringing/delivered right now.
+  mutating func beginSnooze(alarmId: String, triggerAt: Date, now: Date, alerting: [ActiveRingRecord]) {
+    let handled = handledOccurrences[alarmId] ?? 0
+    var occurrence = snoozes[alarmId]?.occurrence ?? 0 // re-snooze keeps the original occurrence
+    for ring in [activeRing, pendingRing].compactMap({ $0 }) + alerting
+      where ring.alarmId == alarmId && ring.scheduledFor > handled {
+      occurrence = max(occurrence, ring.scheduledFor)
+    }
+    if occurrence == 0 {
+      let nowMs = epochMs(now)
+      occurrence = (armedOccurrences[alarmId] ?? []).filter { $0 <= nowMs && $0 > handled }.max() ?? nowMs
+    }
+    snoozes[alarmId] = SnoozeRecord(triggerAt: epochMs(triggerAt), occurrence: occurrence)
+    if activeRing?.alarmId == alarmId { activeRing = nil }
+    if pendingRing?.alarmId == alarmId { pendingRing = nil }
+  }
+
+  /// Occurrence that `markOccurrenceHandled` should mark as handled.
+  func occurrenceToHandle(alarmId: String, now: Date, alerting: [ActiveRingRecord]) -> Double {
+    var occurrence: Double = snoozes[alarmId]?.occurrence ?? 0
+    for ring in [activeRing, pendingRing].compactMap({ $0 }) + alerting where ring.alarmId == alarmId {
+      occurrence = max(occurrence, ring.scheduledFor)
+    }
+    if occurrence == 0 {
+      let nowMs = epochMs(now)
+      occurrence = (armedOccurrences[alarmId] ?? []).filter { $0 <= nowMs }.max() ?? nowMs
+    }
+    return occurrence
   }
 }

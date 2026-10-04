@@ -3,7 +3,7 @@ import { AppState } from 'react-native';
 
 import type { SqlDb } from '../data/db';
 import * as repo from '../data/repositories';
-import { reconcile, type RingSession } from '../domain/ringSession';
+import { reconcile, ringWindowMs, wakeEventId, type RingSession } from '../domain/ringSession';
 import {
   DEFAULT_SETTINGS,
   type Alarm,
@@ -14,7 +14,6 @@ import {
 } from '../domain/types';
 import { syncAlarms, type SyncResult } from '../services/alarmEngine';
 import { getDb } from '../services/database';
-import { newId } from '../services/ids';
 
 export type AppData = {
   ready: boolean;
@@ -101,10 +100,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       repo.getKv<RingSession>(db, 'ringSession'),
     ]);
     const events = await repo.listWakeEvents(db, since - 15 * 86400000);
-    const r = reconcile(alarms, events, since, now, settings.maxRingMinutes, session);
+    const windowMs = ringWindowMs(settings);
+    const r = reconcile(alarms, events, since, now, windowMs, session);
     for (const m of r.missed) {
       await repo.saveWakeEvent(db, {
-        id: newId(),
+        id: wakeEventId(m.alarm.id, m.scheduledFor),
         alarmId: m.alarm.id,
         alarmLabel: m.alarm.label || 'Budík',
         scheduledFor: m.scheduledFor,
@@ -120,7 +120,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const a = alarms.find((x) => x.id === id);
       if (a) await repo.saveAlarm(db, { ...a, enabled: false, skipUntil: null, updatedAt: now });
     }
-    await repo.setKv(db, LAST_RECONCILE_KEY, now);
+    // Occurrences inside the ring window are re-examined next time.
+    await repo.setKv(db, LAST_RECONCILE_KEY, Math.max(since, now - windowMs));
     if (r.missed.length) setState((s) => ({ ...s, historyVersion: s.historyVersion + 1 }));
   }, []);
 
