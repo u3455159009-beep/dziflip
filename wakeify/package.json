@@ -53,7 +53,12 @@
     "web": "expo start --web",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "calibrate:vision": "tsx scripts/calibrate-vision.ts"
+    "calibrate:vision": "tsx scripts/calibrate-vision.ts",
+    "build:android:preview": "eas build --platform android --profile preview",
+    "build:android:dev": "eas build --platform android --profile development",
+    "build:ios:preview": "eas build --platform ios --profile preview",
+    "build:ios:dev": "eas build --platform ios --profile development",
+    "verify": "tsc --noEmit && vitest run && expo export --platform android --platform ios --output-dir dist-verify"
   },
   "private": true
 }

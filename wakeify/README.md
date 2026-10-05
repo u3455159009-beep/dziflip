@@ -1,211 +1,151 @@
-# Wakeify — budík s vlastní hudbou a chytrými úkoly
+# Wakeify — budík s vlastní hudbou a ranními úkoly
 
-Wakeify tě budí tvojí oblíbenou hudbou uloženou přímo v telefonu, tedy bez internetu, i v režimu letadlo a po restartu. Vypnout ho jde až po splnění ranního úkolu: vyfotit předmět, vyřešit příklady, ujít kroky, naskenovat QR kód, nebo kombinaci těchto úkolů.
+Wakeify budí skladbou uloženou v telefonu (bez internetu). Vypnout ho jde až po splnění úkolu: příklady, kroky, QR kód, fotka předmětu nebo jejich kombinace.
 
-Platformy: **Android 7+** a **iOS 16.4+**. Na iOS 26+ se plánuje přes **AlarmKit**, na starších iOS přes oznámení.
-Stack: **Expo SDK 57 / React Native 0.86 / TypeScript** + vlastní nativní modul `modules/wakeify-alarm` (Kotlin a Swift).
+- **Stack:** Expo SDK 57 (React Native 0.86, TypeScript) a vlastní nativní modul `modules/wakeify-alarm`.
+- **Android:** AlarmManager `setAlarmClock` a služba v popředí.
+- **iOS 26+:** AlarmKit. Starší iOS buzení jen přes oznámení.
 
----
-
-## 1. Analýza a volba technologie
-
-| Kritérium | Expo + vlastní nativní modul ✅ | Flutter | Čistě nativní (2× kód) | Expo Go / jen JS |
-|---|---|---|---|---|
-| Spolehlivé buzení | ✅ přímý přístup k AlarmManager, službě v popředí a AlarmKit | ✅ přes platform channels | ✅ | ❌ nelze (bez služby v popředí a AlarmKitu) |
-| Offline hudba | ✅ expo-file-system, MediaPlayer | ✅ | ✅ | ⚠️ jen v popředí |
-| Oprávnění | ✅ nativní + Expo moduly | ✅ | ✅ | ⚠️ |
-| Fotoaparát, QR, rozpoznávání obrazu | ✅ expo-camera (ML Kit / AVFoundation pro QR), vlastní engine v TS | ✅ | ✅ | ✅ |
-| Moderní UI, jeden kód | ✅ | ✅ | ❌ dvě UI | ✅ |
-| Údržba | ✅ TS + malý nativní modul | ✅ Dart | ❌ dvojí práce | — |
-
-**Rozhodnutí:** Expo (Continuous Native Generation, EAS Build) s **vlastním nativním modulem** pro vše, co rozhoduje o spolehlivosti: plánování, zvonění, zamčenou obrazovku a restart. Hybridní framework sám o sobě nestačí. Proto je nativní jádro samostatné a funguje i bez spuštěného JS: po restartu, změně času nebo časového pásma si pravidla budíků přepočítá samo.
-
-### Omezení OS, která návrh respektuje
-
-- **Android:** přesné budíky vyžadují `USE_EXACT_ALARM`/`SCHEDULE_EXACT_ALARM`. Zobrazení přes zamčenou obrazovku vyžaduje `USE_FULL_SCREEN_INTENT` (od Androidu 14 ho může uživatel odebrat). Někteří výrobci (Xiaomi, Huawei…) agresivně uspávají aplikace. Po vynuceném zastavení aplikace Android zruší všechny její budíky.
-- **iOS:** aplikace třetí strany nesmí běžet na pozadí kvůli zvonění. Jediná oficiální cesta je **AlarmKit (iOS 26+)**: zvoní i v tichém režimu a přes Soustředění. Vlastní zvuk ale musí být **kratší než 30 s, nepřehrává se ve smyčce** a **tlačítko Zastavit nejde odebrat**. Na starších iOS jsou k dispozici jen oznámení s 30s zvukem, která tichý režim neprorazí.
-- **Streamovací služby** (Spotify, YouTube…) neumožňují spolehlivé přehrávání na pozadí ani offline mimo vlastní aplikace a mají licenční omezení. Wakeify proto přehrává jen lokální soubory.
+> **Stav:** aplikace ještě **nikdy neběžela na skutečném telefonu** a nebyla sestavena nativním buildem (Gradle / Xcode / EAS). Přehled toho, co je ověřeno a jak, je v sekci 3. Před prvním spolehnutím se na budík proveď test ze sekce 2.
 
 ---
 
-## 2. Architektura
+## 1. Instalace do telefonu (EAS Build)
 
-```
-src/
-  app/                 obrazovky (expo-router)
-    (tabs)/            Budíky · Hudba · Ráno (statistiky) · Nastavení
-    alarm/[id].tsx     editor budíku
-    ring.tsx           zvonění + úkoly
-    welcome.tsx        ranní uvítání
-    permissions.tsx    spolehlivost / onboarding
-    targets/           QR kódy, předměty k vyfocení
-    track/[id].tsx     začátek skladby, přejmenování
-    history.tsx
-  domain/              čistá logika (100% testovaná): plánování, rotace úkolů,
-                       matematika, statistiky, sezení zvonění, QR, krokoměr
-  vision/              offline rozpoznávání fotek (TS) + kalibrační fixtures
-  data/                SQLite schéma, migrace, repozitáře
-  services/            most k nativnímu enginu, hudba, audio, foto, průběh zvonění
-  state/AppProvider    stav aplikace, synchronizace, dohledání zmeškaných budíků
-  ui/                  design systém (tokeny, komponenty, ovládací prvky)
-modules/wakeify-alarm/ nativní engine
-  src/WakeifyAlarm.types.ts   kontrakt JS ↔ nativní
-  android/  AlarmManager.setAlarmClock, služba v popředí s MediaPlayerem,
-            full-screen intent, obnova po restartu, direct boot
-  ios/      AlarmKit (iOS 26+), záložní oznámení, export 29s klipu,
-            opakované buzení
-```
-
-**Tok budíku.** Uložení budíku zapíše záznam do SQLite a zavolá `syncAlarms()`. Nativní engine dostane *pravidla* (hodina, minuta, dny, hlasitost, zvuk) a sám spočítá nejbližší čas. Když budík zazvoní:
-
-- **Android:** služba v popředí přehrává skladbu (zesilování, smyčka, audio focus, vibrace). Full-screen intent otevře `wakeify://ring` i na zamčeném telefonu.
-- **iOS:** AlarmKit přehraje 29s úryvek. Tlačítko „Otevřít Wakeify“ nebo spuštění aplikace zobrazí obrazovku zvonění, která systémový zvuk ztiší a pustí celou skladbu.
-
-Obrazovka zvonění podle plánu (`resolveChallenge`) vybere úkol, uloží *sezení* (počet odložení, kdy začal úkol) a hned zapíše provizorní záznam „zmeškáno“. Po splnění úkolu se záznam změní na „úspěch“ a zavolá se `markOccurrenceHandled`, které zruší opakované buzení.
-
-**Offline-first.** Vše je lokálně:
-
-- budíky, úkoly, historie a nastavení v SQLite (WAL),
-- skladby v `Documents/music`,
-- předlohy fotek v `Documents/targets`.
-
-Žádný účet ani síť. Datová vrstva (`SqlDb` + repozitáře) je oddělená, takže volitelnou cloudovou synchronizaci jde přidat bez zásahu do UI.
-
-**Rozpoznávání fotek (offline).** Fotka se zmenší na 128 px a dekóduje v JS (`jpeg-js`). Pak se porovná s 1–3 předlohami pomocí kombinace deskriptorů:
-
-- HSV histogram s vyvážením bílé (grey-world),
-- prostorové rozložení barev,
-- HOG (8×8 buněk × 9 orientací, Pearsonova korelace),
-- rozložení jasu,
-- dHash.
-
-Prahy jsou **kalibrované na skutečných fotografiích** (scikit-image, matplotlib). Testovací varianty simulují „další ráno“: posun záběru, rotaci ±7°, tmu nebo přesvětlení, teplé světlo lampy, šum a jiný úhel pohledu.
-
-Výsledek při střední přísnosti: **98,6 % pravých záběrů přijato, 0 % cizích scén přijato** (`npm run calibrate:vision`). Kontrola kvality odmítne zakrytý objektiv, tmu nebo prázdnou zeď. Po 3 neúspěšných pokusech se nabídne **alternativní ověření** (5 těžkých příkladů, v historii označeno jako „alternativní ověření“).
-
-Jde o porovnání *konkrétního místa nebo předmětu* s předlohou, ne o obecné rozpoznávání objektů. Fotku oblohy tedy ověří, pokud je pořízená z podobného místa.
-
----
-
-## 3. Stav funkcí — co je hotové a co ne
-
-| Oblast | Stav | Ověřeno |
-|---|---|---|
-| Plánování (opakování, jednorázové, vynechání příštího, letní/zimní čas, změna časového pásma) | ✅ hotovo (TS i Kotlin) | 25 testů v TS + 18 JUnit testů v Kotlinu |
-| Import hudby (MP3/M4A/AAC/WAV/AIFF/CAF/FLAC; OGG/Opus jen Android), ověření přehratelnosti, knihovna, mazání | ✅ | typecheck, Metro bundle |
-| Stažení skladby z přímého odkazu pro offline použití | ✅ (streamovací služby jsou záměrně blokované) | — |
-| Začátek skladby, hlasitost, postupné zesilování, vibrace, jiná skladba pro každý budík | ✅ | — |
-| Android engine: setAlarmClock, služba v popředí, záložní zvuky, audio focus a hovory, obnova po restartu, direct boot, obnova po pádu procesu | ✅ napsáno | jádro se kompiluje proti Android API 35 jar; Expo vrstva zkontrolována proti zdrojům expo-modules-core; **neběželo na zařízení** |
-| iOS engine: AlarmKit, opakované buzení, 29s CAF klip, záložní oznámení s limitem 64 požadavků | ✅ napsáno | syntakticky naparsováno, API ověřena proti dokumentaci Apple; **nekompilováno** (v prostředí chyběl Xcode) |
-| Úkoly: matematika (3 obtížnosti, 1–10 příkladů), kroky (krokoměr OS, jinak akcelerometr), QR (generování, tisk, registrace existujícího kódu), fotka, kombinace | ✅ | doménová logika testovaná; matematika a uvítací obrazovka prokliknuté v prohlížeči (Playwright) |
-| Rotace úkolů: stejný, týdenní plán (i automaticky vytvořený), každý den jiný, každý týden jiný, náhodně | ✅ | testy |
-| Odložení (interval a maximum), série, statistiky, nejčastější časy vstávání, historie včetně zmeškaných | ✅ | testy |
-| Uvítací obrazovka, afirmace (globální i pro každý budík), tmavý i světlý režim, přístupnost (role, popisky, ovládání čtečkou obrazovky) | ✅ | screenshoty |
-| Cloudová synchronizace | ⏳ připravené rozhraní, neimplementováno | — |
-
-**Automatické testy:**
-
-- `npm test` spouští 73 testů v TS: doména, vision na reálných fotkách a repozitáře proti skutečnému SQLite.
-- `npm run typecheck` je bez chyb.
-- `npx expo export` úspěšně sestaví bundle pro Android i iOS.
-- `npx expo prebuild` vygeneruje manifest, Info.plist i entitlements a autolinking najde nativní modul na obou platformách.
-- Web preview (`npx expo start --web`) prošel v Playwrightu tokem *onboarding → nový budík → zvonění → 3 příklady → uvítání* bez chyb.
-
-**Co je potřeba otestovat na zařízení** (v tomto prostředí nebylo Android SDK ani Xcode):
-
-- zvonění při zamčené obrazovce a v Doze,
-- režim letadlo,
-- restart telefonu,
-- fotoaparát a QR v reálu,
-- AlarmKit s klipem v `Library/Sounds`,
-- kompilaci Swift kódu pod Xcode 26.1.
-
-Podrobný seznam rizik je v `modules/wakeify-alarm/ios/README.md` (sekce „Unverified on device“) a v `android/README.md`.
-
-### Doporučený test na zařízení (cca 15 min)
-
-1. Vytvoř budík a importuj MP3. V Nastavení → Spolehlivost povol vše.
-2. Klepni na **„Zkušební budík za 10 s“** a zamkni telefon. Ověř, že se rozsvítí obrazovka a hraje skladba.
-3. Zapni režim letadlo a zopakuj krok 2.
-4. Nastav budík na +3 min, restartuj telefon a odemkni ho. Budík musí zazvonit.
-5. Vyzkoušej každý typ úkolu a odložení (2×). Pak zkontroluj historii a statistiky.
-
----
-
-## 4. Spuštění a vývoj
+Na svém počítači potřebuješ jen Node.js 22.13+. Sestavení proběhne v cloudu Expo. **Hesla ani klíče do repozitáře nepatří**, EAS je spravuje sám.
 
 ```bash
 cd wakeify
-npm install                 # .npmrc má legacy-peer-deps
-npm test                    # unit testy
-npm run typecheck
-npx expo start --web        # rychlý náhled UI v prohlížeči (budíky nezvoní)
+npm install
+npx eas-cli@latest login          # účet na expo.dev (zdarma)
+npx eas-cli@latest init           # vytvoří EAS projekt a zapíše projectId do app.json → commitni
 ```
 
-Expo Go **nestačí**, protože neobsahuje nativní modul. Aplikace to pozná a zobrazí upozornění „Budíky teď nezazvoní“. Pro skutečné buzení je potřeba vývojové sestavení:
+> Identifikátory `app.wakeify` (Android `package`, iOS `bundleIdentifier`) v `app.json` nemusí být volné. Pokud je EAS nebo Apple odmítne, změň je na vlastní, např. `com.tvojejmeno.wakeify`.
+
+### Android (APK)
 
 ```bash
-# Android (Android Studio + SDK 35, připojený telefon s USB laděním)
-npx expo run:android
-# iOS (macOS, Xcode 26.1+, Apple Developer účet kvůli AlarmKitu na zařízení)
-npx expo run:ios --device
+npm run build:android:preview     # = eas build -p android --profile preview
 ```
 
-### Sestavení přes EAS (bez lokálního Xcode / Android Studia)
+1. Po dokončení (cca 10–20 min) otevři v telefonu odkaz nebo QR kód z výstupu EAS a stáhni APK.
+2. Povol instalaci z tohoto zdroje a nainstaluj.
+3. Při prvním spuštění projdi obrazovku **Spolehlivost** a povol přesné budíky, oznámení, zobrazení přes zamčenou obrazovku a výjimku z úspory baterie.
+
+Profil `preview` obsahuje JS přímo v aplikaci, takže je vhodný pro test buzení. Profil `development` potřebuje běžící `npx expo start` a slouží jen k vývoji.
+
+### iPhone (iOS 26+ kvůli AlarmKit)
+
+Potřebuješ **placený Apple Developer účet** (99 USD/rok). Bez něj nejde aplikaci s nativním kódem do iPhonu nainstalovat.
 
 ```bash
-npx eas-cli@latest login
-npx eas-cli@latest build --profile development --platform android   # APK
-npx eas-cli@latest build --profile development --platform ios       # interní distribuce
-npx eas-cli@latest build --profile production --platform all        # obchody
+npx eas-cli@latest device:create  # zaregistruje tvůj iPhone (otevři odkaz v iPhonu)
+npm run build:ios:preview         # EAS si vyžádá přihlášení k Apple účtu a vytvoří certifikáty
 ```
 
-## 5. Instalace
+1. Otevři v iPhonu odkaz z výstupu EAS a nainstaluj.
+2. Zapni **Nastavení → Soukromí a zabezpečení → Režim vývojáře**.
+3. Povol „Alarmy“ (AlarmKit) při prvním dotazu.
 
-- **Android:** stáhni APK z odkazu, který vrátí EAS build. Povol „Instalovat z neznámých zdrojů“ a nainstaluj. Při prvním spuštění projdi obrazovku Spolehlivost (přesné budíky, oznámení, zobrazení přes zamčenou obrazovku, bez omezení baterie).
-- **iPhone:** zaregistruj zařízení příkazem `eas device:create` a sestav profil `development` nebo `preview`. Instalace proběhne přes QR odkaz od EAS. Pak v Nastavení → Soukromí → Režim vývojáře zapni vývojářský režim (iOS 16+). Pro App Store použij `eas submit`.
+EAS použije image `sdk-57` (Xcode 26.6), který podmínku Xcode ≥ 26.1 splňuje.
 
-## 6. Oprávnění
+### Lokálně bez EAS (alternativa)
 
-| Oprávnění | Platforma | Proč |
+`npx expo run:android` (Android Studio a SDK 36) nebo `npx expo run:ios --device` (macOS, Xcode 26.4+). Expo Go **nestačí**, protože neobsahuje nativní modul.
+
+## 2. Test na skutečném telefonu (cca 20 min, nutné před ostrým použitím)
+
+| # | Postup | Očekávání |
 |---|---|---|
-| `USE_EXACT_ALARM` / `SCHEDULE_EXACT_ALARM` (≤ API 32) | Android | přesný čas zvonění (Wakeify je budík, splňuje pravidla Google Play) |
-| `POST_NOTIFICATIONS` | Android 13+ | oznámení zvonícího budíku |
-| `USE_FULL_SCREEN_INTENT` | Android | obrazovka zvonění přes zamčený displej |
-| `FOREGROUND_SERVICE(_MEDIA_PLAYBACK)`, `WAKE_LOCK` | Android | přehrávání při vypnutém displeji |
-| `RECEIVE_BOOT_COMPLETED` | Android | obnova budíků po restartu |
-| `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` | Android | výjimka z úsporného režimu (doporučeno) |
-| `VIBRATE` | Android | vibrace |
-| `CAMERA` | obě | úkoly s fotkou a QR kódem |
-| `ACTIVITY_RECOGNITION` / `NSMotionUsageDescription` | obě | krokoměr |
-| `NSAlarmKitUsageDescription` | iOS 26+ | systémové budíky |
-| Time-sensitive notifications | iOS | záložní engine |
-| Background audio | iOS | celá skladba, když je aplikace otevřená |
+| 1 | Vytvoř budík, importuj MP3, v Nastavení → Spolehlivost povol vše | všechny položky zelené |
+| 2 | Editor budíku → **Uložit a vyzkoušet (za 10 s)**, zamkni telefon | rozsvítí se displej a hraje tvoje skladba (iOS: 29s úryvek, po otevření aplikace celá skladba) |
+| 3 | Totéž v **režimu letadlo** | stejné |
+| 4 | Budík na +3 min, zamkni telefon, nech zazvonit, dej **Odložit** | ztichne, za N minut zazvoní znovu; v historii 1 záznam s odložením |
+| 5 | Při zvonění otevři úkol, uprostřed **zamkni telefon** nebo odejdi na plochu | Android: hraje dál; iOS: hraje dál, a pokud ztichne, systém zazvoní nejpozději do 90 s |
+| 6 | Spusť úkol a **vyřeš ho** | ticho; **žádné další zazvonění** během 15 min (záložní budíky zrušené); v historii „úspěch“ |
+| 7 | iOS: při zvonění stiskni systémové **Zastavit** a aplikaci neotvírej | do 1 min zazvoní záložní budík (opakuje se 10×) |
+| 8 | Jednorázový budík nech zazvonit a vyřeš | v seznamu je vypnutý a druhý den nezazvoní |
+| 9 | Budík na +5 min, **restartuj telefon**, odemkni | zazvoní (Android: obnova po bootu; iOS: AlarmKit) |
+| 10 | Změň časové pásmo v nastavení systému | budík 07:00 zůstane 07:00 místního času |
+| 11 | Úkoly: QR (vytiskni kód), fotka (předloha + ranní fotka ze stejného místa), kroky | splnění vypne budík; po 3 nezdarech u fotky nabídne náhradní ověření |
 
-Blokovaná oprávnění: mikrofon, úložiště a „zobrazení přes jiné aplikace“ se nepoužívají.
+Pokud některý bod selže, pošli mi číslo bodu, model telefonu a verzi systému.
 
-## 7. Známá omezení
+## 3. Co je ověřeno — a jak
 
-1. **iOS:**
-   - Systémový budík přehraje jen **29 s** úryvek, a to jednou.
-   - Wakeify proto plánuje **opakované buzení** (výchozí: každou minutu, 10×), dokud nesplníš úkol.
-   - Tlačítko Zastavit na zamčené obrazovce nejde odebrat.
-   - Celá skladba hraje, jakmile otevřeš aplikaci.
-2. **iOS < 26:** buzení přes oznámení neprorazí tichý režim ani Soustředění a funguje omezeně (30s zvuky, limit 64 naplánovaných oznámení).
-3. **Android:**
-   - Po vynuceném zastavení aplikace v nastavení systému se budíky obnoví až po dalším spuštění Wakeify.
-   - Před prvním odemčením po restartu zazní systémový tón místo skladby (soubor je v šifrovaném úložišti).
-   - Smyčka skladby začíná od 0:00, ne od nastaveného začátku.
-4. **Rozpoznávání fotek** porovnává s tvými předlohami, nejde o obecnou klasifikaci objektů. Při velmi odlišném osvětlení nebo úhlu záběru je k dispozici alternativní ověření.
-5. Kroky z akcelerometru (záloha) jsou méně přesné než systémový krokoměr.
-6. Na webu aplikace běží jen jako náhled UI, budíky tam nezvoní.
+| Oblast | Ověření v tomto prostředí | Na telefonu |
+|---|---|---|
+| TypeScript celé aplikace | `tsc --noEmit` → 0 chyb | — |
+| Doménová logika (plánování vč. letního času a změny pásma, rotace úkolů, matematika, statistiky, odložení, dohledání zmeškaných, statistiky) | **84 testů Vitest** (vč. repozitářů proti skutečnému SQLite) | — |
+| Tok zvonění (pořadí nativních volání, odložení, dokončení, testovací zvonění, souběh) | 9 testů s nahrazeným nativním modulem. Test, který chybu skutečně chytá, je ověřený: prohození pořadí volání nechá 2 testy spadnout | ❌ |
+| JS bundle | `expo export` pro Android i iOS → OK | — |
+| Konfigurace | `expo prebuild` → manifest, Info.plist, entitlements a autolinking modulu na obou platformách OK; `eas.json` validní (`@expo/eas-json`) | — |
+| UI tok | webový náhled + Playwright: onboarding → nový budík → zvonění → 3 příklady → uvítání, světlý i tmavý režim, bez chyb | ❌ (nativní UI neověřeno) |
+| Android engine (Kotlin) | Jádro (9 souborů bez závislosti na Expo) se **kompiluje** proti `android-all` API 35. **39 JUnit testů** prošlo (čas, změna času, obnova po restartu, JSON, ukončení zvonění, cesty k souborům). Vrstva pro Expo (`WakeifyAlarmModule.kt`) je ověřená jen částečnou kompilací proti zdrojům expo-modules-core | ❌ |
+| iOS engine (Swift) | **Typová kontrola** všech 7 souborů skutečným Swift 6.2.4 (Linux) proti ručně psaným náhradám Apple frameworků a Expo; 0 chyb. **15 scénářů** úložiště a plánovače skutečně spuštěno (odložení, záložní budíky, testovací zvonění, dokončení). Nejde o build v Xcode | ❌ |
+| AlarmKit chování | jen podle dokumentace a fór Apple | ❌ **neověřeno** |
 
-## 8. Návrhy dalšího rozvoje
+Opakování kontrol:
 
-- Widget s nejbližším budíkem a Live Activity na iOS.
-- Úkoly: přepsat text, zatřást telefonem, „vstaň z postele“ (snímač blízkosti), čárový kód produktu.
-- Volitelná on-device ML embedding síť (např. MobileNet přes TFLite / Core ML) jako druhý stupeň rozpoznávání fotek.
-- Volitelná šifrovaná cloudová záloha (rozhraní `SqlDb` je připravené).
-- Spánkový režim: postupné ztmavení obrazovky, uspávací playlist, chytré buzení v lehké fázi spánku (HealthKit / Health Connect).
-- Sdílené výzvy a streaky s přáteli.
-- Lokalizace (EN, DE), Apple Watch / Wear OS.
+```bash
+npm run verify                         # tsc + vitest + expo export
+npx tsx scripts/calibrate-vision.ts    # rozpoznávání fotek, ladicí sada
+python3 scripts/vision-heldout/prepare.py /tmp/ho && npx tsx scripts/vision-heldout/evaluate.ts /tmp/ho
+docker run --rm -v "$PWD":/w -w /w/tools/ios-typecheck swift:6.2-noble sh run.sh   # iOS typecheck + harness
+(cd tools/android-verify && gradle clean test)                                      # Kotlin jádro + 39 JUnit testů (JDK 21)
+```
+
+### Rozpoznávání fotek — co čísla znamenají
+
+Porovnání ranní fotky s 1–3 předlohami běží offline v TS (barvy, HOG, rozložení jasu, dHash). Sady:
+
+- **Ladicí sada** (`src/vision/__fixtures__`): 12 fotografií (scikit-image, matplotlib) × 6 syntetických „ranních“ úprav (posun, rotace, tma/světlo, šum, teplé světlo) + 1 stereo pár = 73 pravých dvojic. Na této sadě se **ladily i prahy**. Střední přísnost: přijato 72/73 (98,6 %), cizí scény 0. **Číslo je optimistické**, protože ladicí a testovací data jsou stejná.
+- **Nezávislá sada** (`scripts/vision-heldout`): 54 fotografií z repozitářů OpenCV, prahy zmrazené předem. Střední přísnost:
+  - syntetické úpravy: **317/324 (97,8 %)**
+  - cizí scény přijaté omylem: **1/11 032**
+  - **skutečná změna pozice kamery** (panoramata, stereo páry): jen **10/23 (43,5 %)**
+
+**Co z toho plyne:** fotka spolehlivě projde, když ji ráno uděláš **ze stejného místa a podobným záběrem** jako předlohu. Při posunu o krok nebo jiném úhlu často neprojde. Proto se po 3 nezdarech nabídne náhradní ověření (5 těžkých příkladů). Přesnost na skutečných ranních fotkách z telefonu změřená není.
+
+## 4. Omezení systému (nelze obejít)
+
+**iOS (AlarmKit, ověřeno v dokumentaci a na fórech Apple):**
+- Tlačítko **Zastavit** nejde odebrat ani zablokovat; i fyzická tlačítka alarm ztiší. Wakeify proto plánuje **záložní budíky** (výchozí každou 1 min, 10×) do splnění úkolu.
+- Vlastní zvuk musí být **< 30 s** a podle hlášení vývojářů **hraje jednou, ne ve smyčce**. Zvuk ze složky `Library/Sounds` měl v iOS 26.0 potvrzenou chybu.
+- **Celá skladba hraje jen v otevřené aplikaci.** Když řešíš úkol a aplikace přejde na pozadí, skladba díky režimu audio na pozadí pokračuje. Kdyby ztichla nebo aplikace zanikla, systém zazvoní nejpozději do 90 s (průběžně posouvaná pojistka).
+- Budíky aplikace **skryté nebo zamčené přes Face ID** podle Apple tiše selžou.
+- **iOS < 26:** jen oznámení. Neprorazí tichý režim (to by vyžadovalo entitlement Critical Alerts od Apple) a platí limit 64 naplánovaných oznámení.
+
+**Android:**
+- **Vynucené zastavení** aplikace (Nastavení → Vynutit zastavení) zruší všechny budíky. Vrátí se po dalším spuštění Wakeify.
+- **Po restartu před prvním odemčením** zazní systémový tón místo skladby (soubor je v šifrovaném úložišti). Obrazovka s úkolem se otevře až po odemčení.
+- **Bez oprávnění k oznámením** budík hraje, ale obrazovka zvonění se sama neotevře; musíš otevřít aplikaci.
+- Někteří výrobci (Xiaomi, Huawei, …) aplikace agresivně uspávají. Nastav výjimku z úspory baterie.
+- **Při hovoru** budík jen ztiší (ne úplně). Jiná aplikace přehrávající zvuk ho neumlčí.
+- Smyčka skladby začíná od 0:00, ne od nastaveného začátku.
+
+## 5. Architektura (stručně)
+
+```
+src/app/            obrazovky (expo-router): záložky, editor, zvonění, uvítání, oprávnění, cíle úkolů
+src/domain/         čistá logika — plně testovaná
+src/vision/         offline porovnání fotek
+src/data/           SQLite: schéma, migrace, repozitáře
+src/services/       most k nativnímu enginu, tok zvonění (ringFlow), hudba, audio
+modules/wakeify-alarm/
+  src/WakeifyAlarm.types.ts   kontrakt JS ↔ nativní
+  android/  README.md — architektura, chování, co ověřit na zařízení
+  ios/      README.md — AlarmKit, záložní budíky, odložení, „Unverified on device“
+tools/ios-typecheck/  reprodukovatelná typová kontrola Swiftu
+scripts/vision-heldout/  nezávislé vyhodnocení rozpoznávání fotek
+```
+
+**Tok budíku:**
+
+1. Uložení budíku zapíše data do SQLite a zavolá `syncAlarms`. Nativní engine dostane **pravidla** (čas, dny, zvuk), ne jednotlivé časy, takže po restartu nebo změně času přeplánuje sám.
+2. Když budík zazvoní, obrazovka zvonění vybere úkol a zapíše provizorní záznam „zmeškáno“ (deterministické ID, takže každé probuzení má jeden záznam).
+3. Splnění úkolu → `markOccurrenceHandled(alarmId)` zruší zvonění, odložení i **všechny záložní budíky** daného probuzení a záznam změní na „úspěch“.
+4. Odložení nejdřív naplánuje další zazvonění a **teprve potom** ztiší aktuální. Když plánování selže, budík zvoní dál.
+
+Všechna data jsou jen v telefonu: žádný účet, žádný server.
