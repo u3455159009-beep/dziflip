@@ -47,8 +47,9 @@ export async function getActiveRing(): Promise<ActiveRing | null> {
   }
 }
 
-export async function stopRinging(): Promise<void> {
-  await WakeifyAlarm?.stopRinging().catch(() => {});
+/** Silences the current ring of `alarmId` only (other alarms keep ringing; backups stay armed). */
+export async function stopRinging(alarmId: string): Promise<void> {
+  await WakeifyAlarm?.stopRinging(alarmId).catch(() => {});
 }
 
 export async function markHandled(alarmId: string): Promise<void> {

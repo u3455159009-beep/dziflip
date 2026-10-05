@@ -50,4 +50,36 @@ object AlarmTimeCalculator {
     }
     return null
   }
+
+  /**
+   * Like [nextTrigger], but never returns [lastFired] again: when the clock is
+   * set back (manually or by network time) after an occurrence already rang,
+   * a reschedule would otherwise compute that same occurrence again and ring
+   * it a second time.
+   */
+  fun nextTriggerAfterFired(spec: AlarmSpec, nowMillis: Long, zoneId: ZoneId, lastFired: Long?): Long? {
+    val next = nextTrigger(spec, nowMillis, zoneId)
+    return if (next != null && lastFired != null && next == lastFired) nextTrigger(spec, lastFired, zoneId) else next
+  }
+
+  /**
+   * The occurrence [lastScheduled] that is due/overdue but never fired, or null.
+   * Returned only when it is at most [windowMs] old, has not fired yet, and the
+   * (possibly edited) rule still produces exactly that occurrence (enabled, not
+   * skipped, same time). Rescheduling (sync from JS, boot, time / time-zone
+   * change) must ring such an occurrence instead of silently replacing its
+   * PendingIntent with the next one.
+   */
+  fun overdueOccurrence(
+    spec: AlarmSpec,
+    lastScheduled: Long?,
+    lastFired: Long?,
+    nowMillis: Long,
+    zoneId: ZoneId,
+    windowMs: Long
+  ): Long? {
+    if (lastScheduled == null || lastScheduled > nowMillis || nowMillis - lastScheduled > windowMs) return null
+    if (lastFired == lastScheduled) return null
+    return if (nextTrigger(spec, lastScheduled - 1, zoneId) == lastScheduled) lastScheduled else null
+  }
 }

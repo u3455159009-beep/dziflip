@@ -44,7 +44,10 @@ open class AlarmReceiver : BroadcastReceiver() {
         Intent.ACTION_TIME_CHANGED,
         Intent.ACTION_TIMEZONE_CHANGED,
         AlarmManager.ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED ->
-          AlarmScheduler(context).rescheduleAll(zone = currentZone(intent))
+          // recoverMissed: network time often sets the clock right after boot; without it
+          // this would replace the pending post-boot recovery ring with the next occurrence.
+          // Only an occurrence the rule still produces and that never fired is re-rung.
+          AlarmScheduler(context).rescheduleAll(zone = currentZone(intent), recoverMissed = true)
       }
     } catch (e: Exception) {
       // Never crash the receiver: a crash here would lose every later alarm.

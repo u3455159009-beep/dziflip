@@ -8,6 +8,7 @@ import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-aud
 export class RingPlayer {
   private player: AudioPlayer | null = null;
   private fadeTimer: ReturnType<typeof setInterval> | null = null;
+  private stopped = true;
 
   async start(opts: { uri: string | null; startOffsetMs: number; volume: number; fadeInSeconds: number; loop?: boolean }) {
     this.stop();
@@ -20,6 +21,7 @@ export class RingPlayer {
     const source = opts.uri ? { uri: opts.uri } : require('../../assets/sounds/chime.wav');
     const p = createAudioPlayer(source);
     this.player = p;
+    this.stopped = false;
     p.loop = opts.loop ?? true;
     const target = Math.min(1, Math.max(0.05, opts.volume));
     p.volume = opts.fadeInSeconds > 0 ? 0.05 : target;
@@ -40,11 +42,26 @@ export class RingPlayer {
     }
   }
 
+  /**
+   * Resumes playback if something (a system alarm alert, a call, Siri) paused
+   * it. No-op when stopped on purpose or already playing; keeps the fade level.
+   */
+  ensurePlaying() {
+    const p = this.player;
+    if (!p || this.stopped) return;
+    try {
+      if (!p.playing) p.play();
+    } catch {
+      // player released
+    }
+  }
+
   setVolume(v: number) {
     if (this.player) this.player.volume = v;
   }
 
   stop() {
+    this.stopped = true;
     if (this.fadeTimer) clearInterval(this.fadeTimer);
     this.fadeTimer = null;
     if (this.player) {

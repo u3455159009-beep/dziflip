@@ -85,7 +85,7 @@ class AlarmRingService : Service() {
     val spec = store.getSpec(alarmId) ?: AlarmSpec.fallback(alarmId)
 
     // Call startForeground immediately (5 s deadline), before any slow work.
-    startForegroundCompat(buildNotification(alarmId, spec.label))
+    val foreground = startForegroundCompat(buildNotification(alarmId, spec.label))
 
     val persisted = store.getActiveRing()
     val isRedelivery = (flags and START_FLAG_REDELIVERY) != 0
@@ -131,6 +131,16 @@ class AlarmRingService : Service() {
     val ring = ActiveRing(alarmId, startedAt, scheduledFor, isSnooze, usingFallback, isTest)
     current = ring
     store.setActiveRing(ring)
+    if (!foreground) {
+      // Not foreground (startForeground refused): we may be killed at any time, so
+      // also post the ring notification (tap / full-screen intent opens the ring screen).
+      try {
+        (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
+          .notify(NOTIFICATION_ID, buildNotification(alarmId, spec.label))
+      } catch (e: Exception) {
+        Log.e(TAG, "Could not post ring notification", e)
+      }
+    }
     handler.removeCallbacks(timeoutRunnable)
     handler.postDelayed(timeoutRunnable, maxMs - elapsedMs)
     if (!resume) RingEvents.emitStarted(alarmId, scheduledFor)
@@ -176,6 +186,11 @@ class AlarmRingService : Service() {
     } else {
       @Suppress("DEPRECATION")
       stopForeground(true)
+    }
+    // Also removes the notification posted when startForeground was refused.
+    try {
+      (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(NOTIFICATION_ID)
+    } catch (_: Exception) {
     }
     stopSelf()
   }
@@ -480,12 +495,22 @@ class AlarmRingService : Service() {
 
   // ---- notification -------------------------------------------------------
 
-  private fun startForegroundCompat(notification: Notification) {
+  /**
+   * @return false when the system refused (e.g. ForegroundServiceStartNotAllowedException
+   * on API 31+ when the process was restarted from the background for
+   * START_REDELIVER_INTENT, or an FGS-type SecurityException). Uncaught, that
+   * would crash the process — and with it the ring — in a restart loop.
+   */
+  private fun startForegroundCompat(notification: Notification): Boolean = try {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
       startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
     } else {
       startForeground(NOTIFICATION_ID, notification)
     }
+    true
+  } catch (e: Exception) {
+    Log.e(TAG, "startForeground refused; ringing as a background service", e)
+    false
   }
 
   private fun buildNotification(alarmId: String, label: String): Notification =

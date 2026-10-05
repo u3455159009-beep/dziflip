@@ -88,7 +88,7 @@ export async function snooze(db: SqlDb, alarm: Alarm, s: RingSession): Promise<{
   const next: RingSession = { ...s, snoozeCount: s.snoozeCount + 1, challengeStartedAt: null, snoozedUntil: until };
   await saveSession(db, next);
   await repo.saveWakeEvent(db, provisionalEvent(alarm, next));
-  await stopRinging();
+  await stopRinging(alarm.id);
   return { until };
 }
 
@@ -117,7 +117,23 @@ export async function complete(
 /** Test rings: stop sound and backups, record nothing. */
 export async function finishTestRing(alarmId: string): Promise<void> {
   await markHandled(alarmId);
-  await stopRinging();
+  await stopRinging(alarmId);
+}
+
+/** Seconds after leaving the ring screen (background / lock) before the system rings again. */
+export const BACKGROUND_RERING_SECONDS = 60;
+
+/**
+ * iOS safety net: while the challenge is unsolved, the only sound is the
+ * in-app song. If the app goes to the background (lock, home, call) that song
+ * may be interrupted and never resume, and the AlarmKit backups only cover a
+ * few minutes after the original time. So arm a system re-ring (a snooze of
+ * the same occurrence, which also re-arms backups after it) — it is harmless
+ * if the user comes back first: the ring screen silences it on arrival, and
+ * markOccurrenceHandled cancels it on completion. Does NOT count as a snooze.
+ */
+export async function armBackgroundReRing(alarmId: string): Promise<void> {
+  await scheduleSnooze(alarmId, Date.now() + BACKGROUND_RERING_SECONDS * 1000).catch(() => false);
 }
 
 /** The ring ended without the challenge (native timeout) — keep the provisional "missed" event. */

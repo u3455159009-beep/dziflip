@@ -3,7 +3,7 @@ import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, BackHandler, ScrollView, View } from 'react-native';
+import { Alert, AppState, BackHandler, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { HoldChallenge } from '../components/challenges/HoldChallenge';
@@ -16,6 +16,7 @@ import { kindLabel, resolveChallenge, stepLabel } from '../domain/rotation';
 import { formatTime } from '../domain/schedule';
 import type { Alarm, Challenge, ChallengeKind, ChallengeStep } from '../domain/types';
 import {
+  engineAvailable,
   getActiveRing,
   onRingStarted,
   onRingStopped,
@@ -25,7 +26,7 @@ import {
 } from '../services/alarmEngine';
 import { RingPlayer } from '../services/audio';
 import { getDb } from '../services/database';
-import { abandon, beginRing, complete, finishTestRing, getSession, markChallengeStarted, ringUi, snooze } from '../services/ringFlow';
+import { abandon, armBackgroundReRing, beginRing, complete, finishTestRing, getSession, markChallengeStarted, ringUi, snooze } from '../services/ringFlow';
 import { useApp } from '../state/AppProvider';
 import { Button, Row, Text } from '../ui/components';
 import { radius, space, useTheme } from '../ui/theme';
@@ -65,6 +66,7 @@ export default function Ring() {
   const player = useRef(new RingPlayer());
   const finished = useRef(false);
   const alarmIdRef = useRef<string | null>(null);
+  const dryRunRef = useRef(false);
 
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 1000);
@@ -102,12 +104,13 @@ export default function Ring() {
       const a = ring ? app.alarms.find((x) => x.id === ring!.alarmId) ?? null : null;
       if (!alive) return;
       if (!ring || !a) {
-        if (ring && !a) await stopRinging(); // alarm was deleted meanwhile
+        if (ring && !a) await stopRinging(ring.alarmId); // alarm was deleted meanwhile
         setPhase({ kind: 'idle' });
         return;
       }
       const testRing = !demo && ring.isTest === true;
       setIsTest(testRing);
+      dryRunRef.current = demo || testRing;
       const s: RingSession =
         demo || testRing
           ? { eventId: 'dry-run', alarmId: a.id, scheduledFor: ring.scheduledFor, firstRingAt: ring.startedAt, snoozeCount: 0, challengeStartedAt: null }
@@ -120,12 +123,19 @@ export default function Ring() {
       setChallenge(ch);
       setPhase({ kind: 'ringing' });
       if (playsInAppWhileRinging) {
-        // iOS: silence the 29 s system clip, play the whole song in-app.
-        if (!demo) await stopRinging();
+        // iOS: start the whole song in-app first, then silence only this
+        // alarm's 29 s system clip (other alarms are untouched).
         const tr = app.tracks.find((x) => x.id === a.trackId);
-        await player.current
+        const started = await player.current
           .start({ uri: tr?.uri ?? null, startOffsetMs: tr?.startOffsetMs ?? 0, volume: a.volume, fadeInSeconds: a.fadeInSeconds })
-          .catch(() => {});
+          .then(() => true)
+          .catch(() => false);
+        // Never trade a ringing system alarm for silence: only silence it when
+        // the in-app song actually started.
+        if (started && !demo) {
+          await stopRinging(a.id);
+          player.current.ensurePlaying(); // the system alert may have interrupted our session
+        }
       }
     })();
     return () => {
@@ -134,12 +144,34 @@ export default function Ring() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [app.ready]);
 
+  // iOS: the in-app song is the only sound until the challenge is solved.
+  // Resume it after audio interruptions, and arm a system re-ring whenever
+  // the app leaves the foreground (lock screen, home button, incoming call).
+  useEffect(() => {
+    if (!playsInAppWhileRinging) return;
+    const watchdog = setInterval(() => {
+      if (!finished.current && alarmIdRef.current) player.current.ensurePlaying();
+    }, 2000);
+    const sub = AppState.addEventListener('change', (st) => {
+      const id = alarmIdRef.current;
+      if (!id || finished.current) return;
+      if (st === 'background' && engineAvailable && !dryRunRef.current) void armBackgroundReRing(id);
+      if (st === 'active') player.current.ensurePlaying();
+    });
+    return () => {
+      clearInterval(watchdog);
+      sub.remove();
+    };
+  }, []);
+
   // iOS: a backup re-alarm of the alarm being handled here fires while the
   // ring screen is open → silence the system clip, the in-app song keeps playing.
   useEffect(
     () =>
       onRingStarted((e) => {
-        if (playsInAppWhileRinging && !finished.current && e.alarmId === alarmIdRef.current) void stopRinging();
+        if (playsInAppWhileRinging && !finished.current && e.alarmId === alarmIdRef.current) {
+          void stopRinging(e.alarmId).then(() => player.current.ensurePlaying());
+        }
       }),
     [],
   );

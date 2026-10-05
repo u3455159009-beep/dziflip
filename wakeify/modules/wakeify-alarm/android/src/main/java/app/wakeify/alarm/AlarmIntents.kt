@@ -3,7 +3,9 @@ package app.wakeify.alarm
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 
 /** Kinds of FIRE pending intents; each kind has its own PendingIntent per alarm id. */
 enum class FireKind(val key: String) {
@@ -72,8 +74,29 @@ object AlarmIntents {
   /** Plain launch intent of the host app (used for AlarmClockInfo.showIntent). */
   fun launchIntent(context: Context): Intent {
     val launch = context.packageManager.getLaunchIntentForPackage(context.packageName)
-      ?: Intent(Intent.ACTION_MAIN).setPackage(context.packageName).addCategory(Intent.CATEGORY_LAUNCHER)
+      ?: directBootSafeLaunchIntent(context)
     return launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+  }
+
+  /**
+   * getLaunchIntentForPackage() returns null in direct boot (before the first
+   * unlock after a reboot) because the launcher activity is not directBootAware.
+   * The old fallback was an implicit MAIN/LAUNCHER intent; once ringActivityIntent()
+   * adds the wakeify://ring data it no longer matches the launcher filter, so the
+   * ring notification's tap / full-screen intent resolved to nothing. Resolve the
+   * launcher activity explicitly instead (works whether or not the user is unlocked).
+   */
+  private fun directBootSafeLaunchIntent(context: Context): Intent {
+    val main = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setPackage(context.packageName)
+    try {
+      val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+        PackageManager.MATCH_DIRECT_BOOT_AWARE or PackageManager.MATCH_DIRECT_BOOT_UNAWARE
+      } else 0
+      val info = context.packageManager.queryIntentActivities(main, flags).firstOrNull()?.activityInfo
+      if (info != null) return Intent(main).setClassName(info.packageName, info.name).setPackage(null)
+    } catch (_: Exception) {
+    }
+    return main
   }
 
   fun showAppPendingIntent(context: Context): PendingIntent =

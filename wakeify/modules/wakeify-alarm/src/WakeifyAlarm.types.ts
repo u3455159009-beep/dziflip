@@ -103,7 +103,10 @@ export type WakeifyAlarmNativeModule = {
   scheduleSnooze(alarmId: string, triggerAt: number): Promise<void>;
   cancelSnooze(alarmId: string): Promise<void>;
   /** Stops sound + vibration + foreground service / system alert. */
-  stopRinging(): Promise<void>;
+  stopRinging(alarmId?: string): Promise<void>;
+  // ↑ With `alarmId`: silence only that alarm's current ring (system sound /
+  //   service); another alarm ringing at the same time keeps ringing, pending
+  //   backups/snoozes are untouched. Without: silence every Wakeify ring.
   /** Currently ringing alarm (persisted natively, survives JS reloads), or null. */
   getActiveRing(): Promise<ActiveRing | null>;
   /**

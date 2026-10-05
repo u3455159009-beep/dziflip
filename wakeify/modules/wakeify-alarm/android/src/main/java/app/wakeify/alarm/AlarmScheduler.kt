@@ -28,20 +28,24 @@ class AlarmScheduler(context: Context) {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) am.canScheduleExactAlarms() else true
 
   /** Replace the whole alarm set (from JS) and reschedule everything. */
-  @Synchronized
   fun sync(specs: List<AlarmSpec>, nowMillis: Long = System.currentTimeMillis(), zone: ZoneId = ZoneId.systemDefault()): List<Result> {
-    val newIds = specs.map { it.id }.toSet()
-    val oldIds = store.getSpecs().map { it.id }.toSet() + store.getScheduledTriggers().keys + store.getSnoozes().keys
-    for (removed in oldIds - newIds) {
-      cancel(FireKind.REGULAR, removed)
-      cancel(FireKind.SNOOZE, removed)
-      store.removeSnooze(removed)
+    synchronized(LOCK) {
+      val newIds = specs.map { it.id }.toSet()
+      val oldIds = store.getSpecs().map { it.id }.toSet() + store.getScheduledTriggers().keys + store.getSnoozes().keys
+      for (removed in oldIds - newIds) {
+        cancel(FireKind.REGULAR, removed)
+        cancel(FireKind.SNOOZE, removed)
+        cancel(FireKind.TEST, removed)
+        store.removeSnooze(removed)
+      }
+      store.setSpecs(specs)
+      store.retainScheduledTriggers(newIds)
+      // recoverMissed: an occurrence that is due but not delivered yet (inexact
+      // window, pending post-boot recovery) must not be replaced by the next one.
+      val results = specs.map { scheduleRegular(it, nowMillis, zone, recoverMissed = true) }
+      store.setUsingInexactFallback(results.any { it.triggerAt != null && !it.exact })
+      return results
     }
-    store.setSpecs(specs)
-    store.retainScheduledTriggers(newIds)
-    val results = specs.map { scheduleRegular(it, nowMillis, zone, recoverMissed = false) }
-    store.setUsingInexactFallback(results.any { it.triggerAt != null && !it.exact })
-    return results
   }
 
   /**
@@ -52,52 +56,59 @@ class AlarmScheduler(context: Context) {
    * the phone was off/booting (within [RECOVERY_WINDOW_MS]) and never fired is
    * rung a few seconds from now instead of being lost.
    */
-  @Synchronized
   fun rescheduleAll(
     nowMillis: Long = System.currentTimeMillis(),
     zone: ZoneId = ZoneId.systemDefault(),
     recoverMissed: Boolean = false
   ): List<Result> {
-    val results = store.getSpecs().map { scheduleRegular(it, nowMillis, zone, recoverMissed) }
-    for ((id, t) in store.getSnoozes()) {
-      when {
-        t > nowMillis -> setAlarm(FireKind.SNOOZE, id, t, store.getSnoozeOrigin(id) ?: t, snoozeTriggerAt = t)
-        recoverMissed && nowMillis - t <= RECOVERY_WINDOW_MS && store.getFired(snoozeFiredKey(id)) != t ->
-          setAlarm(FireKind.SNOOZE, id, nowMillis + RECOVERY_DELAY_MS, store.getSnoozeOrigin(id) ?: t, snoozeTriggerAt = t)
-        else -> store.removeSnooze(id)
+    synchronized(LOCK) {
+      val results = store.getSpecs().map { scheduleRegular(it, nowMillis, zone, recoverMissed) }
+      for ((id, t) in store.getSnoozes()) {
+        when {
+          t > nowMillis -> setAlarm(FireKind.SNOOZE, id, t, store.getSnoozeOrigin(id) ?: t, snoozeTriggerAt = t)
+          recoverMissed && nowMillis - t <= RECOVERY_WINDOW_MS && store.getFired(snoozeFiredKey(id)) != t ->
+            setAlarm(FireKind.SNOOZE, id, nowMillis + RECOVERY_DELAY_MS, store.getSnoozeOrigin(id) ?: t, snoozeTriggerAt = t)
+          else -> store.removeSnooze(id)
+        }
       }
+      store.setUsingInexactFallback(results.any { it.triggerAt != null && !it.exact })
+      return results
     }
-    store.setUsingInexactFallback(results.any { it.triggerAt != null && !it.exact })
-    return results
   }
 
-  @Synchronized
   fun scheduleRegular(spec: AlarmSpec, nowMillis: Long, zone: ZoneId, recoverMissed: Boolean): Result {
-    if (recoverMissed && spec.enabled) {
-      val last = store.getScheduledTriggers()[spec.id]
-      if (last != null && last <= nowMillis && nowMillis - last <= RECOVERY_WINDOW_MS && store.getFired(spec.id) != last) {
-        Log.w(TAG, "Recovering missed occurrence of ${spec.id} scheduled for $last")
-        val exact = setAlarm(FireKind.REGULAR, spec.id, nowMillis + RECOVERY_DELAY_MS, last)
-        return Result(spec.id, nowMillis + RECOVERY_DELAY_MS, exact)
+    synchronized(LOCK) {
+      val lastFired = store.getFired(spec.id)
+      if (recoverMissed) {
+        val last = AlarmTimeCalculator.overdueOccurrence(
+          spec, store.getScheduledTriggers()[spec.id], lastFired, nowMillis, zone, RECOVERY_WINDOW_MS
+        )
+        if (last != null) {
+          Log.w(TAG, "Recovering missed occurrence of ${spec.id} scheduled for $last")
+          val exact = setAlarm(FireKind.REGULAR, spec.id, nowMillis + RECOVERY_DELAY_MS, last)
+          return Result(spec.id, nowMillis + RECOVERY_DELAY_MS, exact)
+        }
       }
+      // Never re-schedule the occurrence that already rang (clock set back).
+      val next = AlarmTimeCalculator.nextTriggerAfterFired(spec, nowMillis, zone, lastFired)
+      if (next == null) {
+        cancel(FireKind.REGULAR, spec.id)
+        store.setScheduledTrigger(spec.id, null)
+        return Result(spec.id, null, true)
+      }
+      val exact = setAlarm(FireKind.REGULAR, spec.id, next, next)
+      store.setScheduledTrigger(spec.id, next)
+      return Result(spec.id, next, exact)
     }
-    val next = AlarmTimeCalculator.nextTrigger(spec, nowMillis, zone)
-    if (next == null) {
-      cancel(FireKind.REGULAR, spec.id)
-      store.setScheduledTrigger(spec.id, null)
-      return Result(spec.id, null, true)
-    }
-    val exact = setAlarm(FireKind.REGULAR, spec.id, next, next)
-    store.setScheduledTrigger(spec.id, next)
-    return Result(spec.id, next, exact)
   }
 
-  @Synchronized
   fun scheduleSnooze(alarmId: String, triggerAt: Long): Boolean {
-    val origin = snoozeOrigin(alarmId, triggerAt)
-    store.putSnooze(alarmId, triggerAt)
-    store.putSnoozeOrigin(alarmId, origin)
-    return setAlarm(FireKind.SNOOZE, alarmId, triggerAt, origin, snoozeTriggerAt = triggerAt)
+    synchronized(LOCK) {
+      val origin = snoozeOrigin(alarmId, triggerAt)
+      store.putSnooze(alarmId, triggerAt)
+      store.putSnoozeOrigin(alarmId, origin)
+      return setAlarm(FireKind.SNOOZE, alarmId, triggerAt, origin, snoozeTriggerAt = triggerAt)
+    }
   }
 
   /**
@@ -112,15 +123,16 @@ class AlarmScheduler(context: Context) {
     return triggerAt
   }
 
-  @Synchronized
   fun cancelSnooze(alarmId: String) {
-    cancel(FireKind.SNOOZE, alarmId)
-    store.removeSnooze(alarmId)
+    synchronized(LOCK) {
+      cancel(FireKind.SNOOZE, alarmId)
+      store.removeSnooze(alarmId)
+    }
   }
 
-  @Synchronized
-  fun scheduleTestRing(alarmId: String, triggerAt: Long): Boolean =
+  fun scheduleTestRing(alarmId: String, triggerAt: Long): Boolean = synchronized(LOCK) {
     setAlarm(FireKind.TEST, alarmId, triggerAt, triggerAt)
+  }
 
   /**
    * Should a FIRE of this kind actually ring? Regular occurrences of alarms that
@@ -137,7 +149,6 @@ class AlarmScheduler(context: Context) {
    * Bookkeeping after an occurrence fired: schedule the next one.
    * [triggerAt]: the instant the snooze was set for (snooze bookkeeping is keyed by it).
    */
-  @Synchronized
   fun onFired(
     alarmId: String,
     scheduledFor: Long,
@@ -146,25 +157,27 @@ class AlarmScheduler(context: Context) {
     nowMillis: Long = System.currentTimeMillis(),
     zone: ZoneId = ZoneId.systemDefault()
   ) {
-    when (kind) {
-      FireKind.REGULAR -> {
-        store.setFired(alarmId, scheduledFor)
-        val spec = store.getSpec(alarmId) ?: return
-        if (spec.isOneShot) {
-          // One-shot: it has rung, disable it natively (JS must mirror this on next launch).
-          store.updateSpec(spec.copy(enabled = false))
-          cancel(FireKind.REGULAR, alarmId)
-          store.setScheduledTrigger(alarmId, null)
-        } else {
-          scheduleRegular(spec, maxOf(nowMillis, scheduledFor), zone, recoverMissed = false)
+    synchronized(LOCK) {
+      when (kind) {
+        FireKind.REGULAR -> {
+          store.setFired(alarmId, scheduledFor)
+          val spec = store.getSpec(alarmId) ?: return
+          if (spec.isOneShot) {
+            // One-shot: it has rung, disable it natively (JS must mirror this on next launch).
+            store.updateSpec(spec.copy(enabled = false))
+            cancel(FireKind.REGULAR, alarmId)
+            store.setScheduledTrigger(alarmId, null)
+          } else {
+            scheduleRegular(spec, maxOf(nowMillis, scheduledFor), zone, recoverMissed = false)
+          }
         }
+        FireKind.SNOOZE -> {
+          store.setFired(snoozeFiredKey(alarmId), triggerAt)
+          // Only clear when it is still the same snooze (a newer one may have been set).
+          if (store.getSnoozes()[alarmId] == triggerAt) store.removeSnooze(alarmId)
+        }
+        FireKind.TEST -> Unit
       }
-      FireKind.SNOOZE -> {
-        store.setFired(snoozeFiredKey(alarmId), triggerAt)
-        // Only clear when it is still the same snooze (a newer one may have been set).
-        if (store.getSnoozes()[alarmId] == triggerAt) store.removeSnooze(alarmId)
-      }
-      FireKind.TEST -> Unit
     }
   }
 
@@ -215,5 +228,12 @@ class AlarmScheduler(context: Context) {
     const val INEXACT_WINDOW_MS = 10 * 60_000L
 
     fun snoozeFiredKey(alarmId: String) = "snooze:$alarmId"
+
+    /**
+     * Process-wide lock: every caller (module thread, receivers on the main
+     * thread) creates its own AlarmScheduler, so the former per-instance
+     * @Synchronized did not serialise e.g. sync() against onFired().
+     */
+    private val LOCK = Any()
   }
 }
