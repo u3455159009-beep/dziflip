@@ -17,6 +17,7 @@ import { formatTime } from '../domain/schedule';
 import type { Alarm, Challenge, ChallengeKind, ChallengeStep } from '../domain/types';
 import {
   getActiveRing,
+  onRingStarted,
   onRingStopped,
   playsInAppWhileRinging,
   setShowOverLockScreen,
@@ -63,6 +64,7 @@ export default function Ring() {
   const [now, setNow] = useState(new Date());
   const player = useRef(new RingPlayer());
   const finished = useRef(false);
+  const alarmIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 1000);
@@ -112,6 +114,7 @@ export default function Ring() {
           : await beginRing(db, a, ring);
       const ch = resolveChallenge(a.plan, a.id, new Date(s.scheduledFor));
       if (!alive) return;
+      alarmIdRef.current = a.id;
       setAlarm(a);
       setSession(s);
       setChallenge(ch);
@@ -130,6 +133,16 @@ export default function Ring() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [app.ready]);
+
+  // iOS: a backup re-alarm of the alarm being handled here fires while the
+  // ring screen is open → silence the system clip, the in-app song keeps playing.
+  useEffect(
+    () =>
+      onRingStarted((e) => {
+        if (playsInAppWhileRinging && !finished.current && e.alarmId === alarmIdRef.current) void stopRinging();
+      }),
+    [],
+  );
 
   // Native ring timed out (maxRingMinutes) → it's a missed wake-up.
   useEffect(

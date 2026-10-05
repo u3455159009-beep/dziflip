@@ -325,11 +325,17 @@ export function bestMatch(candidate: FeatureVector, references: FeatureVector[])
 }
 
 /**
- * Acceptance thresholds, calibrated on real photographs with simulated
- * "next morning" conditions (shifted framing, ±7° rotation, darker/brighter
- * exposure, warm lamp tint, blur + sensor noise, a second viewpoint) versus
- * unrelated scenes — see src/vision/vision.test.ts and scripts/calibrate-vision.ts.
- * At 'medium' ≈98 % of genuine retakes pass and no unrelated scene did.
+ * Acceptance thresholds. Chosen on the CALIBRATION set (src/vision/__fixtures__:
+ * 12 photos × 6 synthetic "next morning" variants + 1 stereo view = 73 genuine
+ * pairs; at 'medium' 72/73 accepted, 0 unrelated pairs accepted). Because the
+ * same set was used for tuning, that number is optimistic.
+ *
+ * Frozen and re-measured on a HELD-OUT set never used for tuning
+ * (scripts/vision-heldout, 54 OpenCV photos), 'medium':
+ *   synthetic retakes 317/324 (97.8 %), unrelated scenes 1/11032 (0.01 %),
+ *   REAL camera-position changes only 10/23 (43.5 %).
+ * → reliable when the morning photo is taken from about the same spot as the
+ *   reference; a moved camera often fails, hence the alternative verification.
  */
 export const THRESHOLDS: Record<'easy' | 'medium' | 'hard', number> = {
   easy: 0.45,
