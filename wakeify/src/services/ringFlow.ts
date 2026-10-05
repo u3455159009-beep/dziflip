@@ -120,20 +120,25 @@ export async function finishTestRing(alarmId: string): Promise<void> {
   await stopRinging(alarmId);
 }
 
-/** Seconds after leaving the ring screen (background / lock) before the system rings again. */
-export const BACKGROUND_RERING_SECONDS = 60;
+/** The system re-ring is kept this far ahead while the ring screen is alive… */
+export const RERING_AHEAD_SECONDS = 90;
+/** …and pushed forward this often (must be well below RERING_AHEAD_SECONDS). */
+export const RERING_REFRESH_SECONDS = 60;
 
 /**
- * iOS safety net: while the challenge is unsolved, the only sound is the
- * in-app song. If the app goes to the background (lock, home, call) that song
- * may be interrupted and never resume, and the AlarmKit backups only cover a
- * few minutes after the original time. So arm a system re-ring (a snooze of
- * the same occurrence, which also re-arms backups after it) — it is harmless
- * if the user comes back first: the ring screen silences it on arrival, and
- * markOccurrenceHandled cancels it on completion. Does NOT count as a snooze.
+ * iOS safety net ("dead man's switch"): after the ring screen silenced the
+ * system alert, the only sound is the in-app song. If the app is suspended,
+ * killed or its audio interrupted, nothing would ring again once the AlarmKit
+ * backups (a few minutes after the original time) are used up. So while the
+ * ring screen is alive we keep a system re-ring RERING_AHEAD_SECONDS ahead
+ * (a snooze of the same occurrence, which also re-arms backups after it) and
+ * push it forward every RERING_REFRESH_SECONDS. It never fires while the app
+ * works; if the app dies, the system rings within 90 s. Not counted as a user
+ * snooze; markOccurrenceHandled cancels it on completion.
+ * Relies on no code running at background transition (iOS may suspend first).
  */
-export async function armBackgroundReRing(alarmId: string): Promise<void> {
-  await scheduleSnooze(alarmId, Date.now() + BACKGROUND_RERING_SECONDS * 1000).catch(() => false);
+export async function armReRing(alarmId: string): Promise<void> {
+  await scheduleSnooze(alarmId, Date.now() + RERING_AHEAD_SECONDS * 1000).catch(() => false);
 }
 
 /** The ring ended without the challenge (native timeout) — keep the provisional "missed" event. */

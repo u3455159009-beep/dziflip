@@ -26,7 +26,7 @@ import {
 } from '../services/alarmEngine';
 import { RingPlayer } from '../services/audio';
 import { getDb } from '../services/database';
-import { abandon, armBackgroundReRing, beginRing, complete, finishTestRing, getSession, markChallengeStarted, ringUi, snooze } from '../services/ringFlow';
+import { RERING_REFRESH_SECONDS, abandon, armReRing, beginRing, complete, finishTestRing, getSession, markChallengeStarted, ringUi, snooze } from '../services/ringFlow';
 import { useApp } from '../state/AppProvider';
 import { Button, Row, Text } from '../ui/components';
 import { radius, space, useTheme } from '../ui/theme';
@@ -67,6 +67,8 @@ export default function Ring() {
   const finished = useRef(false);
   const alarmIdRef = useRef<string | null>(null);
   const dryRunRef = useRef(false);
+  /** iOS: a system re-ring is pending (see armReRing). */
+  const reRingArmed = useRef(false);
 
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 1000);
@@ -133,8 +135,12 @@ export default function Ring() {
         // Never trade a ringing system alarm for silence: only silence it when
         // the in-app song actually started.
         if (started && !demo) {
+          // Arm the system re-ring BEFORE silencing: there is never a moment
+          // without either a sounding alarm or a pending one.
+          if (engineAvailable && !dryRunRef.current) await armReRing(a.id);
           await stopRinging(a.id);
           player.current.ensurePlaying(); // the system alert may have interrupted our session
+          reRingArmed.current = true;
         }
       }
     })();
@@ -152,14 +158,16 @@ export default function Ring() {
     const watchdog = setInterval(() => {
       if (!finished.current && alarmIdRef.current) player.current.ensurePlaying();
     }, 2000);
-    const sub = AppState.addEventListener('change', (st) => {
+    const heartbeat = setInterval(() => {
       const id = alarmIdRef.current;
-      if (!id || finished.current) return;
-      if (st === 'background' && engineAvailable && !dryRunRef.current) void armBackgroundReRing(id);
-      if (st === 'active') player.current.ensurePlaying();
+      if (id && reRingArmed.current && !finished.current && engineAvailable && !dryRunRef.current) void armReRing(id);
+    }, RERING_REFRESH_SECONDS * 1000);
+    const sub = AppState.addEventListener('change', (st) => {
+      if (st === 'active' && !finished.current) player.current.ensurePlaying();
     });
     return () => {
       clearInterval(watchdog);
+      clearInterval(heartbeat);
       sub.remove();
     };
   }, []);
@@ -239,23 +247,31 @@ export default function Ring() {
   }, [challenge, phase]);
 
   const doSnooze = async () => {
-    if (!alarm || !session) return;
-    player.current.stop();
+    if (!alarm || !session || finished.current) return;
     if (dryRun) {
+      player.current.stop();
       if (isTest) await finishTestRing(alarm.id);
       router.replace('/');
       return;
     }
+    // Pause the re-ring heartbeat so it cannot overwrite the user's snooze.
+    finished.current = true;
     try {
       const r = await snooze(await getDb(), alarm, session);
-      if (r) {
-        finished.current = true;
-        app.historyChanged();
-        router.replace('/');
-        const d = new Date(r.until);
-        setTimeout(() => Alert.alert('Odloženo', `Budík znovu zazvoní v ${formatTime(d.getHours(), d.getMinutes())}.`), 400);
+      if (!r) {
+        finished.current = false;
+        return;
       }
+      // Only now is the next ring guaranteed — stop the in-app song.
+      player.current.stop();
+      app.historyChanged();
+      router.replace('/');
+      const d = new Date(r.until);
+      setTimeout(() => Alert.alert('Odloženo', `Budík znovu zazvoní v ${formatTime(d.getHours(), d.getMinutes())}.`), 400);
     } catch (e) {
+      // Snooze failed: keep ringing (song keeps playing, heartbeat resumes).
+      finished.current = false;
+      player.current.ensurePlaying();
       Alert.alert('Odložení selhalo', e instanceof Error ? e.message : String(e));
     }
   };
