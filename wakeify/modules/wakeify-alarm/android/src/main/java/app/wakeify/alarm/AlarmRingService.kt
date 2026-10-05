@@ -57,8 +57,9 @@ class AlarmRingService : Service() {
   private var focusListener: AudioManager.OnAudioFocusChangeListener? = null
 
   private var fadeStartElapsed = 0L
-  private var pausedForFocusLoss = false
-  private var ducked = false
+  /** We lost audio focus (any kind). Never pauses/ducks the alarm; only triggers periodic re-requests. */
+  private var focusLost = false
+  private var lastFocusRequestElapsed = 0L
 
   override fun onBind(intent: Intent?): IBinder? = null
 
@@ -216,8 +217,7 @@ class AlarmRingService : Service() {
     abandonAudioFocus()
     wakeLock?.let { if (it.isHeld) it.release() }
     wakeLock = null
-    pausedForFocusLoss = false
-    ducked = false
+    focusLost = false
   }
 
   // ---- audio --------------------------------------------------------------
@@ -344,8 +344,11 @@ class AlarmRingService : Service() {
   private var fadeDurationMs = 0L
 
   /**
-   * Runs every 250 ms while ringing: drives the fade-in ramp (0.05 -> 1.0) and
-   * lowers the volume while a phone/VoIP call is active.
+   * Runs every 250 ms while ringing: drives the fade-in ramp (0.05 -> 1.0),
+   * lowers the volume (never to 0) while a phone/VoIP call is active and
+   * restores it when the call ends (polled — a focus GAIN may never arrive),
+   * restarts playback if anything paused it, and re-requests audio focus every
+   * [FOCUS_RETRY_MS] while it is lost. Audio-focus loss never silences the alarm.
    */
   private val volumeRunnable = object : Runnable {
     override fun run() {
@@ -354,14 +357,14 @@ class AlarmRingService : Service() {
         val t = (SystemClock.elapsedRealtime() - fadeStartElapsed).toFloat() / fadeDurationMs
         (0.05f + 0.95f * t).coerceIn(0.05f, 1f)
       }
-      val inCall = isInCall()
-      var v = fade
-      if (inCall) v = minOf(v, IN_CALL_VOLUME)
-      if (ducked) v *= DUCK_FACTOR
+      val v = if (isInCall()) minOf(fade, IN_CALL_VOLUME) else fade
       try {
         mp.setVolume(v, v)
-        if (pausedForFocusLoss && mp.isPlaying) mp.pause()
+        if (!mp.isPlaying) mp.start() // e.g. paused by the system: an alarm keeps sounding
       } catch (_: IllegalStateException) {
+      }
+      if (focusLost && SystemClock.elapsedRealtime() - lastFocusRequestElapsed >= FOCUS_RETRY_MS) {
+        reRequestAudioFocus()
       }
       handler.postDelayed(this, 250)
     }
@@ -383,40 +386,52 @@ class AlarmRingService : Service() {
           .setWillPauseWhenDucked(false)
           .build()
         focusRequest = req
-        audioManager.requestAudioFocus(req)
+        lastFocusRequestElapsed = SystemClock.elapsedRealtime()
+        focusLost = audioManager.requestAudioFocus(req) != AudioManager.AUDIOFOCUS_REQUEST_GRANTED
       } else {
+        lastFocusRequestElapsed = SystemClock.elapsedRealtime()
         @Suppress("DEPRECATION")
-        audioManager.requestAudioFocus(listener, AudioManager.STREAM_ALARM, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+        focusLost = audioManager.requestAudioFocus(listener, AudioManager.STREAM_ALARM, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT) !=
+          AudioManager.AUDIOFOCUS_REQUEST_GRANTED
       }
     } catch (e: Exception) {
       // Keep ringing even without focus.
       Log.w(TAG, "Audio focus request failed", e)
+      focusLost = true
     }
   }
 
+  /** Re-request focus with the existing request/listener; playback continues either way. */
+  private fun reRequestAudioFocus() {
+    lastFocusRequestElapsed = SystemClock.elapsedRealtime()
+    try {
+      val granted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        focusRequest?.let { audioManager.requestAudioFocus(it) }
+      } else {
+        @Suppress("DEPRECATION")
+        focusListener?.let { audioManager.requestAudioFocus(it, AudioManager.STREAM_ALARM, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT) }
+      }
+      if (granted == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) focusLost = false
+    } catch (e: Exception) {
+      Log.w(TAG, "Audio focus re-request failed", e)
+    }
+  }
+
+  /**
+   * Policy: the alarm must never go silent before the challenge is solved, so
+   * NO focus loss (transient, can-duck or permanent) pauses, ducks or stops it.
+   * A loss only schedules periodic re-requests (volumeRunnable). The only volume
+   * reduction is during an active call (isInCall, polled), never to 0.
+   */
   private fun onFocusChange(change: Int) {
-    val mp = player
     when (change) {
-      AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
-        // e.g. incoming phone call: pause, resume on gain. Vibration continues.
-        pausedForFocusLoss = true
-        try {
-          mp?.pause()
-        } catch (_: IllegalStateException) {
-        }
+      AudioManager.AUDIOFOCUS_LOSS,
+      AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
+      AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+        focusLost = true
+        lastFocusRequestElapsed = SystemClock.elapsedRealtime()
       }
-      AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> ducked = true
-      AudioManager.AUDIOFOCUS_GAIN -> {
-        ducked = false
-        if (pausedForFocusLoss) {
-          pausedForFocusLoss = false
-          try {
-            mp?.start()
-          } catch (_: IllegalStateException) {
-          }
-        }
-      }
-      // AUDIOFOCUS_LOSS (permanent): an alarm must stay audible — keep playing.
+      AudioManager.AUDIOFOCUS_GAIN -> focusLost = false
     }
   }
 
@@ -523,7 +538,7 @@ class AlarmRingService : Service() {
     const val NOTIFICATION_ID = 0x5A1A
     private const val ACTION_START = "app.wakeify.alarm.action.START_RING"
     private const val IN_CALL_VOLUME = 0.15f
-    private const val DUCK_FACTOR = 0.3f
+    private const val FOCUS_RETRY_MS = 2_000L
 
     @Volatile private var instance: AlarmRingService? = null
     private val mainHandler = Handler(Looper.getMainLooper())

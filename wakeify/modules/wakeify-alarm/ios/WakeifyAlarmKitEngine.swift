@@ -371,10 +371,20 @@ final class WakeifyAlarmKitEngine: WakeifyEngine {
     }
   }
 
-  func stopRinging() async {
+  /// `stop(id:)` only ends the current alert: a `.fixed` alarm (backup,
+  /// snooze, test, one-shot) is removed, a relative one moves on to its next
+  /// occurrence. The other backups/snooze are separate alarms and stay armed.
+  func stopRinging(alarmId: String?) async {
     let alarms = (try? manager.alarms) ?? []
-    let ours = store.read { Set($0.systemAlarms.keys) }
-    for alarm in alarms where alarm.state == .alerting && ours.contains(alarm.id.uuidString) {
+    let ours = store.read { state in
+      Set(state.systemAlarms.filter { alarmId == nil || $0.value.alarmId == alarmId }.keys)
+    }
+    stop(alarms.filter { ours.contains($0.id.uuidString) })
+  }
+
+  /// Stops those of `alarms` that are alerting (reported as "dismissed").
+  private func stop(_ alarms: [Alarm]) {
+    for alarm in alarms where alarm.state == .alerting {
       lock.withLock { _ = stopRequested.insert(alarm.id.uuidString) }
       try? manager.stop(id: alarm.id)
     }
@@ -383,22 +393,32 @@ final class WakeifyAlarmKitEngine: WakeifyEngine {
   func markHandled(alarmId: String) async {
     let now = Date()
     let alarms = (try? manager.alarms) ?? []
-    store.mutate { state in
+    let isTest: Bool = store.mutate { state in
       let alerting = alarms.filter { $0.state == .alerting }
         .compactMap { ringRecord(for: $0, state: state, now: now) }
+      if state.handlesTestRing(alarmId: alarmId, alerting: alerting) {
+        // Test ring: only the test goes away; the real occurrence, its
+        // snooze and its backups are untouched.
+        state.clearTestRing(alarmId: alarmId)
+        return true
+      }
       let occurrence = state.occurrenceToHandle(alarmId: alarmId, now: now, alerting: alerting)
       state.handledOccurrences[alarmId] = max(state.handledOccurrences[alarmId] ?? 0, occurrence)
       if state.activeRing?.alarmId == alarmId { state.activeRing = nil }
       if state.pendingRing?.alarmId == alarmId { state.pendingRing = nil }
-      // Handling clears any snooze (pending or fired) and, via sync, its backups.
+      // Handling clears any snooze (pending or fired, including the JS
+      // background safety-net snooze) and, via sync, all its backups.
       state.snoozes.removeValue(forKey: alarmId)
+      return false
     }
-    let ours = store.read { state in Set(state.systemAlarms.filter { $0.value.alarmId == alarmId }.keys) }
-    for alarm in alarms where alarm.state == .alerting && ours.contains(alarm.id.uuidString) {
-      lock.withLock { _ = stopRequested.insert(alarm.id.uuidString) }
-      try? manager.stop(id: alarm.id)
+    let ours = store.read { state in
+      Set(state.systemAlarms.filter { $0.value.alarmId == alarmId && (!isTest || $0.value.kind == .test) }.keys)
     }
-    // Re-sync: drops the handled occurrence's backups and arms the next one.
+    stop(alarms.filter { ours.contains($0.id.uuidString) })
+    // Re-sync cancels every non-alerting alarm of ours and re-creates only
+    // what is still wanted: the handled occurrence's backups, the snooze and
+    // its backups are gone; the next occurrence (and its backups) is armed.
+    // For a test ring nothing but the test changes.
     _ = await sync(specs: nil)
   }
 

@@ -29,7 +29,8 @@ enum SoundClipError: Error, CustomStringConvertible {
   }
 }
 
-final class WakeifySoundClipper {
+// Stateless apart from `queue`, which is lock-protected.
+final class WakeifySoundClipper: @unchecked Sendable {
   static let shared = WakeifySoundClipper()
 
   /// Keep a margin under the documented 30 s hard limit.

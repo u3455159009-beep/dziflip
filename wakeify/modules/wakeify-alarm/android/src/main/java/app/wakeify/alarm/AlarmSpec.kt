@@ -135,6 +135,18 @@ data class ActiveRing(
   }
 
   companion object {
+    /**
+     * markOccurrenceHandled(alarmId): should the pending snooze of [alarmId] be
+     * cancelled? Not when what is being handled is a TEST ring (finishing a test
+     * ring must not cancel a real snooze of the same alarm). The ring being
+     * handled is the active ring of that alarm, or — when it already stopped
+     * (timeout) — the last ring that started for it.
+     */
+    fun handledCancelsSnooze(alarmId: String, active: ActiveRing?, last: ActiveRing?): Boolean {
+      val handled = active?.takeIf { it.alarmId == alarmId } ?: last?.takeIf { it.alarmId == alarmId }
+      return handled?.isTest != true
+    }
+
     fun fromJson(o: JSONObject): ActiveRing = ActiveRing(
       alarmId = o.getString("alarmId"),
       startedAt = o.getLong("startedAt"),

@@ -241,10 +241,12 @@ final class WakeifyNotificationEngine: WakeifyEngine {
     _ = await sync(specs: nil)
   }
 
-  private func removeDelivered(alarmId: String) async {
+  /// Removes delivered notifications of `alarmId` (only those of `kind` when given).
+  private func removeDelivered(alarmId: String, kind: SystemAlarmKind? = nil) async {
+    let prefix = "\(Self.idPrefix)\(alarmId)." + (kind.map { "\($0.rawValue)" } ?? "")
     let delivered = await center.deliveredNotifications()
     center.removeDeliveredNotifications(withIdentifiers: delivered.map(\.request.identifier)
-      .filter { $0.hasPrefix("\(Self.idPrefix)\(alarmId).") })
+      .filter { $0.hasPrefix(prefix) })
   }
 
   func scheduleTest(alarmId: String, at date: Date) async throws {
@@ -327,21 +329,30 @@ final class WakeifyNotificationEngine: WakeifyEngine {
     }
   }
 
-  func stopRinging() async {
+  func stopRinging(alarmId: String?) async {
     // A delivered notification's sound cannot be stopped directly; removing
     // our delivered notifications is the closest equivalent. Pending bursts
     // stay until markOccurrenceHandled, so leaving the app keeps ringing.
+    let prefix = alarmId.map { "\(Self.idPrefix)\($0)." } ?? Self.idPrefix
     let delivered = await center.deliveredNotifications()
-    center.removeDeliveredNotifications(withIdentifiers: delivered.map(\.request.identifier).filter { $0.hasPrefix(Self.idPrefix) })
+    center.removeDeliveredNotifications(withIdentifiers: delivered.map(\.request.identifier).filter { $0.hasPrefix(prefix) })
   }
 
   func markHandled(alarmId: String) async {
     let now = Date()
     let rings = await deliveredRings()
+    var isTest = false
     let ended: ActiveRingRecord? = store.mutate { state in
       let delivered = rings
         .filter { $0.occurrence <= epochMs(now) }
         .map { ringRecord(from: $0, rings: rings, state: state) }
+      if state.handlesTestRing(alarmId: alarmId, alerting: delivered) {
+        // Test ring: only the test (and its bursts, via sync) goes away.
+        isTest = true
+        let endedRing = state.activeRing?.alarmId == alarmId ? state.activeRing : nil
+        state.clearTestRing(alarmId: alarmId)
+        return endedRing
+      }
       let occurrence = state.occurrenceToHandle(alarmId: alarmId, now: now, alerting: delivered)
       state.handledOccurrences[alarmId] = max(state.handledOccurrences[alarmId] ?? 0, occurrence)
       let endedRing = state.activeRing?.alarmId == alarmId ? state.activeRing : nil
@@ -351,7 +362,7 @@ final class WakeifyNotificationEngine: WakeifyEngine {
       state.snoozes.removeValue(forKey: alarmId)
       return endedRing
     }
-    await removeDelivered(alarmId: alarmId)
+    await removeDelivered(alarmId: alarmId, kind: isTest ? .test : nil)
     // Re-sync removes the handled occurrence's bursts and arms the next one.
     _ = await sync(specs: nil)
     if let ended {

@@ -153,6 +153,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const mutateAlarms = async (fn: (db: SqlDb) => Promise<void>) => {
       const db = await getDb();
       await fn(db);
+      // Mirror natively expired one-shots first, otherwise this sync would
+      // re-arm an already-rung one-shot alarm for tomorrow.
+      await reconcileNow().catch(() => {});
       await refreshAndSync();
     };
     return {
@@ -200,7 +203,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       saveSettings: (s) => mutateAlarms((db) => repo.saveSettings(db, s)),
       historyChanged: () => setState((s) => ({ ...s, historyVersion: s.historyVersion + 1 })),
     };
-  }, [load, refreshAndSync, resyncWith]);
+  }, [load, refreshAndSync, resyncWith, reconcileNow]);
 
   const value = useMemo(() => ({ ...state, ...actions }), [state, actions]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

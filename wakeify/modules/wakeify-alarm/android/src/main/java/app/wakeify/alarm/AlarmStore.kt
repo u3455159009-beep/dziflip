@@ -97,8 +97,25 @@ class AlarmStore private constructor(private val prefs: SharedPreferences) {
   @Synchronized
   fun setActiveRing(ring: ActiveRing?) {
     val e = prefs.edit()
-    if (ring == null) e.remove(KEY_ACTIVE_RING) else e.putString(KEY_ACTIVE_RING, ring.toJson().toString())
+    if (ring == null) {
+      e.remove(KEY_ACTIVE_RING)
+    } else {
+      val json = ring.toJson().toString()
+      e.putString(KEY_ACTIVE_RING, json)
+      e.putString(KEY_LAST_RING, json) // kept after the ring stops (see getLastRing)
+    }
     e.commit()
+  }
+
+  /** Most recently started ring (not cleared when it stops), or null. */
+  @Synchronized
+  fun getLastRing(): ActiveRing? {
+    val raw = prefs.getString(KEY_LAST_RING, null) ?: return null
+    return try {
+      ActiveRing.fromJson(JSONObject(raw))
+    } catch (e: Exception) {
+      null
+    }
   }
 
   // ---- misc ---------------------------------------------------------------
@@ -162,6 +179,7 @@ class AlarmStore private constructor(private val prefs: SharedPreferences) {
     private const val KEY_TRIGGERS = "scheduledTriggers"
     private const val KEY_FIRED = "fired"
     private const val KEY_ACTIVE_RING = "activeRing"
+    private const val KEY_LAST_RING = "lastRing"
     private const val KEY_SAVED_VOLUME = "savedAlarmVolume"
     private const val KEY_NOTIF_ASKED = "notificationPermissionRequested"
     private const val KEY_INEXACT = "usingInexactFallback"

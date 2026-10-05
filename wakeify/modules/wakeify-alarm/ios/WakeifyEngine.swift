@@ -20,7 +20,9 @@ protocol WakeifyEngine: AnyObject {
   func scheduleSnooze(alarmId: String, at date: Date) async throws
   func cancelSnooze(alarmId: String) async
   func scheduleTest(alarmId: String, at date: Date) async throws
-  func stopRinging() async
+  /// Silences the alerting system alarm(s) / delivered notifications of
+  /// `alarmId` (all Wakeify alarms when nil). Pending backups/snoozes stay armed.
+  func stopRinging(alarmId: String?) async
   func activeRing() async -> ActiveRingRecord?
   func markHandled(alarmId: String) async
   /// Removes everything this engine scheduled (used when switching engines).
@@ -111,16 +113,21 @@ enum WakeifyIntentBridge {
         scheduledFor = epochMs(previous)
       }
       if scheduledFor <= 0 { scheduledFor = epochMs(now) }
-      let existing = state.activeRing.flatMap { $0.alarmId == alarmId ? $0 : nil }
       let usingFallback = state.systemAlarms.values.first { $0.alarmId == alarmId }?.usingFallbackSound ?? false
       let isSnooze = kind == SystemAlarmKind.snooze.rawValue
-      let reported = existing.map { $0.isSnooze == isSnooze ? $0.scheduledFor : scheduledFor } ?? scheduledFor
+      let isTest = kind == SystemAlarmKind.test.rawValue
+      // Same ring already observed (alerting) → keep its start time. Only
+      // the same occurrence/kind counts, never e.g. an older test ring.
+      let existing = [state.activeRing, state.pendingRing].compactMap { $0 }.first {
+        $0.alarmId == alarmId && $0.isSnooze == isSnooze && $0.isTest == isTest && abs($0.scheduledFor - scheduledFor) < 60_000
+      }
+      let reported = existing?.scheduledFor ?? scheduledFor
       let record = ActiveRingRecord(
         alarmId: alarmId,
-        startedAt: (existing?.isSnooze == isSnooze ? existing?.startedAt : nil) ?? epochMs(now),
+        startedAt: existing?.startedAt ?? epochMs(now),
         scheduledFor: reported,
         isSnooze: isSnooze,
-        isTest: kind == SystemAlarmKind.test.rawValue,
+        isTest: isTest,
         usingFallbackSound: usingFallback,
         expiresAt: state.expiry(for: alarmId, scheduledFor: reported, isSnooze: isSnooze)
       )

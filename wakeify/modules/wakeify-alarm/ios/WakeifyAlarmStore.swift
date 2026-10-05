@@ -52,7 +52,8 @@ struct PersistedState: Codable {
   }
 }
 
-final class WakeifyAlarmStore {
+// All state access goes through `lock`.
+final class WakeifyAlarmStore: @unchecked Sendable {
   static let shared = WakeifyAlarmStore()
 
   private static let defaultsKey = "app.wakeify.alarm.state.v1"
@@ -301,7 +302,12 @@ extension PersistedState {
     if let ring = pendingRing, ring.expiresAt <= nowMs || !isRingValid(ring, nowMs: nowMs) {
       pendingRing = nil
     }
-    return activeRing ?? pendingRing
+    // The fresher record wins (an unfinished older test ring must not hide a
+    // newer real ring recorded by the intent). It becomes the active ring,
+    // i.e. the ring JS is shown, which markOccurrenceHandled then refers to.
+    let ring = [activeRing, pendingRing].compactMap { $0 }.max { $0.startedAt < $1.startedAt }
+    if let ring { activeRing = ring }
+    return ring
   }
 
   /// False when the ring's occurrence was handled, or when it is snoozed:
@@ -335,7 +341,7 @@ extension PersistedState {
     let handled = handledOccurrences[alarmId] ?? 0
     var occurrence = snoozes[alarmId]?.occurrence ?? 0 // re-snooze keeps the original occurrence
     for ring in [activeRing, pendingRing].compactMap({ $0 }) + alerting
-      where ring.alarmId == alarmId && ring.scheduledFor > handled {
+      where ring.alarmId == alarmId && !ring.isTest && ring.scheduledFor > handled {
       occurrence = max(occurrence, ring.scheduledFor)
     }
     if occurrence == 0 {
@@ -343,14 +349,36 @@ extension PersistedState {
       occurrence = (armedOccurrences[alarmId] ?? []).filter { $0 <= nowMs && $0 > handled }.max() ?? nowMs
     }
     snoozes[alarmId] = SnoozeRecord(triggerAt: epochMs(triggerAt), occurrence: occurrence)
-    if activeRing?.alarmId == alarmId { activeRing = nil }
-    if pendingRing?.alarmId == alarmId { pendingRing = nil }
+    if activeRing?.alarmId == alarmId, activeRing?.isTest != true { activeRing = nil }
+    if pendingRing?.alarmId == alarmId, pendingRing?.isTest != true { pendingRing = nil }
   }
 
-  /// Occurrence that `markOccurrenceHandled` should mark as handled.
+  /// True when `markOccurrenceHandled(alarmId)` refers to a TEST ring. The
+  /// ring the ring screen got from getActiveRing() is the persisted active
+  /// ring (written whenever an alerting alarm / delivered notification is
+  /// seen), else an alerting one, else the pending one from the intent.
+  /// Finishing a test ring must not mark the real (possibly unhandled,
+  /// snoozed or backed-up) occurrence of the same alarm as handled.
+  func handlesTestRing(alarmId: String, alerting: [ActiveRingRecord]) -> Bool {
+    let primary = (activeRing?.alarmId == alarmId ? activeRing : nil)
+      ?? alerting.first { $0.alarmId == alarmId }
+      ?? (pendingRing?.alarmId == alarmId ? pendingRing : nil)
+    return primary?.isTest == true
+  }
+
+  /// Drops the test ring of `alarmId` (pending test + its ring records only).
+  mutating func clearTestRing(alarmId: String) {
+    testRings.removeValue(forKey: alarmId)
+    if activeRing?.alarmId == alarmId, activeRing?.isTest == true { activeRing = nil }
+    if pendingRing?.alarmId == alarmId, pendingRing?.isTest == true { pendingRing = nil }
+  }
+
+  /// Occurrence that `markOccurrenceHandled` should mark as handled. Test
+  /// rings never count (their scheduledFor is the test time, which would
+  /// otherwise mark the alarm's real unhandled occurrence as handled).
   func occurrenceToHandle(alarmId: String, now: Date, alerting: [ActiveRingRecord]) -> Double {
     var occurrence: Double = snoozes[alarmId]?.occurrence ?? 0
-    for ring in [activeRing, pendingRing].compactMap({ $0 }) + alerting where ring.alarmId == alarmId {
+    for ring in [activeRing, pendingRing].compactMap({ $0 }) + alerting where ring.alarmId == alarmId && !ring.isTest {
       occurrence = max(occurrence, ring.scheduledFor)
     }
     if occurrence == 0 {

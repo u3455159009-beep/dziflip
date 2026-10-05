@@ -74,10 +74,12 @@ public class WakeifyAlarmModule: Module {
       }
     }
 
-    AsyncFunction("stopRinging") { (promise: Promise) in
+    // `alarmId` is optional (trailing optional args may be omitted from JS):
+    // with it only that alarm's alert is silenced, without it every Wakeify alert.
+    AsyncFunction("stopRinging") { (alarmId: String?, promise: Promise) in
       self.run(promise) {
         let engine = await self.currentEngine()
-        await engine.stopRinging()
+        await engine.stopRinging(alarmId: alarmId)
         return nil
       }
     }

@@ -110,8 +110,10 @@ class WakeifyAlarmModule : Module() {
       AlarmScheduler(context).cancelSnooze(alarmId)
     }
 
-    AsyncFunction("stopRinging") {
-      AlarmRingService.stop(context, RingEvents.REASON_DISMISSED)
+    // stopRinging(alarmId?): with an id, only stops when THAT alarm is the one
+    // ringing (another alarm's ring keeps going); its pending snooze is kept.
+    AsyncFunction("stopRinging") { alarmId: String? ->
+      AlarmRingService.stop(context, RingEvents.REASON_DISMISSED, onlyAlarmId = alarmId)
     }
 
     AsyncFunction("getActiveRing") {
@@ -120,8 +122,11 @@ class WakeifyAlarmModule : Module() {
 
     AsyncFunction("markOccurrenceHandled") { alarmId: String ->
       val ctx = context
+      val store = AlarmStore.get(ctx)
+      // Decide before stopping (stop clears the active ring).
+      val cancelSnooze = ActiveRing.handledCancelsSnooze(alarmId, store.getActiveRing(), store.getLastRing())
       AlarmRingService.stop(ctx, RingEvents.REASON_DISMISSED, onlyAlarmId = alarmId)
-      AlarmScheduler(ctx).cancelSnooze(alarmId)
+      if (cancelSnooze) AlarmScheduler(ctx).cancelSnooze(alarmId)
     }
 
     Function("setShowOverLockScreen") { show: Boolean ->
