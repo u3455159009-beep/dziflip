@@ -341,12 +341,14 @@ export const NOTIFICATION_CHANNEL_LABELS: Record<NotificationChannel, string> = 
   SMS: "SMS"
 };
 
-export const ALERT_REASONS = ["NEW_MATCH", "PRICE_DROP"] as const;
+export const ALERT_REASONS = ["NEW_MATCH", "PRICE_DROP", "LISTING_REMOVED", "LISTING_RELISTED"] as const;
 export type AlertReason = (typeof ALERT_REASONS)[number];
 
 export const ALERT_REASON_LABELS: Record<AlertReason, string> = {
   NEW_MATCH: "Nová shoda",
-  PRICE_DROP: "Snížení ceny"
+  PRICE_DROP: "Snížení ceny",
+  LISTING_REMOVED: "Inzerát stažen",
+  LISTING_RELISTED: "Inzerát se vrátil do nabídky"
 };
 
 export const DATA_CONFIDENCE_LEVELS = ["HIGH", "MEDIUM", "LOW"] as const;

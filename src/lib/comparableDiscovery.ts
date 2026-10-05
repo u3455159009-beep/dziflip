@@ -14,6 +14,7 @@ import { prisma } from "@/lib/prisma";
 import { SOURCE_PROVIDERS } from "./sources/registry";
 import { SourceNotAvailableError, type ListingSourceItem } from "./sources/types";
 import { rescoreAllComparables } from "./comparableScoring";
+import { logProviderSuccess, logProviderError } from "./providerCallLog";
 
 export interface ComparableDiscoveryResult {
   activeProviders: string[];
@@ -99,9 +100,11 @@ export async function discoverComparablesForProject(
   const errors: string[] = [];
 
   for (const provider of activeProviders) {
+    const startedAt = Date.now();
     try {
       const results = await provider.findComparables!(subjectItem);
       for (const item of results) found.push({ item, providerKey: provider.key });
+      await logProviderSuccess(provider.key, { resultCount: results.length, latencyMs: Date.now() - startedAt });
     } catch (err) {
       // One provider failing must never abort discovery via the others —
       // but it must also never be reported as silently healthy. Logging it
@@ -110,7 +113,7 @@ export async function discoverComparablesForProject(
       // provider that's actually working.
       const message = err instanceof SourceNotAvailableError ? err.message : "vyhledávání selhalo.";
       errors.push(`${provider.label}: ${message}`);
-      await prisma.providerErrorLog.create({ data: { provider: provider.key, errorMessage: message } }).catch(() => {});
+      await logProviderError(provider.key, message, { latencyMs: Date.now() - startedAt });
     }
   }
 
