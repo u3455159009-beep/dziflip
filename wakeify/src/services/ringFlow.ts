@@ -133,7 +133,8 @@ export const RERING_REFRESH_SECONDS = 60;
  * ring screen is alive we keep a system re-ring RERING_AHEAD_SECONDS ahead
  * (a snooze of the same occurrence, which also re-arms backups after it) and
  * push it forward every RERING_REFRESH_SECONDS. It never fires while the app
- * works; if the app dies, the system rings within 90 s. Not counted as a user
+ * works; if the app dies, the system should ring within ~90 s (intended — not
+ * yet verified on an iPhone). Not counted as a user
  * snooze; markOccurrenceHandled cancels it on completion.
  * Relies on no code running at background transition (iOS may suspend first).
  */

@@ -26,6 +26,12 @@ the file name ends in `Package.kt` and it imports
 
 ## Behaviour notes
 
+- **Audio focus (intended, NOT verified on a device)**: the ring never pauses
+  or ducks on any focus loss; focus is re-requested every 2 s and a paused
+  player is restarted. Only during a call (`AudioManager.mode` IN_CALL /
+  IN_COMMUNICATION) the volume drops to 15 % (not 0). OEMs may still lower
+  the alarm stream during calls.
+
 - **Time semantics**: local wall clock; ISO weekdays; empty weekdays = one-shot;
   strictly after now; occurrences `< skipUntil` skipped. DST gap -> shifted
   forward (02:30 on spring-forward day rings at 03:30); DST overlap -> earlier

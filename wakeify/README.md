@@ -62,9 +62,9 @@ EAS použije image `sdk-57` (Xcode 26.6), který podmínku Xcode ≥ 26.1 splňu
 | 2 | Editor budíku → **Uložit a vyzkoušet (za 10 s)**, zamkni telefon | rozsvítí se displej a hraje tvoje skladba (iOS: 29s úryvek, po otevření aplikace celá skladba) |
 | 3 | Totéž v **režimu letadlo** | stejné |
 | 4 | Budík na +3 min, zamkni telefon, nech zazvonit, dej **Odložit** | ztichne, za N minut zazvoní znovu; v historii 1 záznam s odložením |
-| 5 | Při zvonění otevři úkol, uprostřed **zamkni telefon** nebo odejdi na plochu | Android: hraje dál; iOS: hraje dál, a pokud ztichne, systém zazvoní nejpozději do 90 s |
+| 5 | Při zvonění otevři úkol, uprostřed **zamkni telefon** nebo odejdi na plochu | *Zamýšleno:* Android hraje dál; iOS hraje dál, a pokud ztichne, systém zazvoní znovu do ~90 s. **Tento bod rozhodne, zda to platí.** |
 | 6 | Spusť úkol a **vyřeš ho** | ticho; **žádné další zazvonění** během 15 min (záložní budíky zrušené); v historii „úspěch“ |
-| 7 | iOS: při zvonění stiskni systémové **Zastavit** a aplikaci neotvírej | do 1 min zazvoní záložní budík (opakuje se 10×) |
+| 7 | iOS: při zvonění stiskni systémové **Zastavit** a aplikaci neotvírej | *Zamýšleno:* do ~1 min zazvoní záložní budík (opakuje se 10×) |
 | 8 | Jednorázový budík nech zazvonit a vyřeš | v seznamu je vypnutý a druhý den nezazvoní |
 | 9 | Budík na +5 min, **restartuj telefon**, odemkni | zazvoní (Android: obnova po bootu; iOS: AlarmKit) |
 | 10 | Změň časové pásmo v nastavení systému | budík 07:00 zůstane 07:00 místního času |
@@ -108,12 +108,14 @@ Porovnání ranní fotky s 1–3 předlohami běží offline v TS (barvy, HOG, r
 
 **Co z toho plyne:** fotka spolehlivě projde, když ji ráno uděláš **ze stejného místa a podobným záběrem** jako předlohu. Při posunu o krok nebo jiném úhlu často neprojde. Proto se po 3 nezdarech nabídne náhradní ověření (5 těžkých příkladů). Přesnost na skutečných ranních fotkách z telefonu změřená není.
 
+> **Zamýšlené vs. ověřené chování.** Všechna tvrzení o tom, *kdy* budík znovu zazvoní (~1 min záložní budík, ~90 s pojistka, ~2 s obnovení skladby) a že budík „neztichne“, popisují, **jak je kód napsaný**. Na skutečném telefonu ověřená nejsou. Kotlin testy, Swift typová kontrola i testy toku zvonění běží proti náhradám systému, nikoli proti Androidu nebo iOS.
+
 ## 4. Omezení systému (nelze obejít)
 
 **iOS (AlarmKit, ověřeno v dokumentaci a na fórech Apple):**
 - Tlačítko **Zastavit** nejde odebrat ani zablokovat; i fyzická tlačítka alarm ztiší. Wakeify proto plánuje **záložní budíky** (výchozí každou 1 min, 10×) do splnění úkolu.
 - Vlastní zvuk musí být **< 30 s** a podle hlášení vývojářů **hraje jednou, ne ve smyčce**. Zvuk ze složky `Library/Sounds` měl v iOS 26.0 potvrzenou chybu.
-- **Celá skladba hraje jen v otevřené aplikaci.** Když řešíš úkol a aplikace přejde na pozadí, skladba díky režimu audio na pozadí pokračuje. Kdyby ztichla nebo aplikace zanikla, systém zazvoní nejpozději do 90 s (průběžně posouvaná pojistka).
+- **Celá skladba hraje jen v otevřené aplikaci.** *Zamýšlené chování, neověřené na iPhonu:* když řešíš úkol a aplikace přejde na pozadí, skladba pokračuje díky režimu audio na pozadí. Když ji přeruší systém, aplikace se ji pokusí každé ~2 s obnovit. Když ztichne nebo aplikace zanikne, má systém zazvonit znovu do ~90 s (průběžně posouvaná pojistka). Testy s náhradami Apple frameworků tohle **nepotvrzují**. Chování AlarmKitu a audio session se ukáže až na telefonu (sekce 2, body 5 a 7).
 - Budíky aplikace **skryté nebo zamčené přes Face ID** podle Apple tiše selžou.
 - **iOS < 26:** jen oznámení. Neprorazí tichý režim (to by vyžadovalo entitlement Critical Alerts od Apple) a platí limit 64 naplánovaných oznámení.
 
@@ -122,7 +124,7 @@ Porovnání ranní fotky s 1–3 předlohami běží offline v TS (barvy, HOG, r
 - **Po restartu před prvním odemčením** zazní systémový tón místo skladby (soubor je v šifrovaném úložišti). Obrazovka s úkolem se otevře až po odemčení.
 - **Bez oprávnění k oznámením** budík hraje, ale obrazovka zvonění se sama neotevře; musíš otevřít aplikaci.
 - Někteří výrobci (Xiaomi, Huawei, …) aplikace agresivně uspávají. Nastav výjimku z úspory baterie.
-- **Při hovoru** budík jen ztiší (ne úplně). Jiná aplikace přehrávající zvuk ho neumlčí.
+- **Při hovoru** se budík jen ztiší (ne úplně). *Zamýšleno, neověřeno na zařízení:* jiná aplikace přehrávající zvuk by ho neměla umlčet (kód při ztrátě audio focusu nepauzuje). Někteří výrobci ale mohou zvuk budíku během hovoru ztlumit systémově.
 - Smyčka skladby začíná od 0:00, ne od nastaveného začátku.
 
 ## 5. Architektura (stručně)
