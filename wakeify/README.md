@@ -35,20 +35,59 @@ npm run build:android:preview     # = eas build -p android --profile preview
 
 Profil `preview` obsahuje JS přímo v aplikaci, takže je vhodný pro test buzení. Profil `development` potřebuje běžící `npx expo start` a slouží jen k vývoji.
 
-### iPhone (iOS 26+ kvůli AlarmKit)
+### iPhone (iOS 26+ kvůli AlarmKit) — přes TestFlight
 
-Potřebuješ **placený Apple Developer účet** (99 USD/rok). Bez něj nejde aplikaci s nativním kódem do iPhonu nainstalovat.
+Bez Macu, bez registrace zařízení a bez Režimu vývojáře. Build a odeslání do TestFlightu může spustit kdokoli, kdo má tajné údaje v proměnných prostředí, včetně Claude v cloudovém prostředí. Skript `scripts/eas-ios-testflight.sh` je nikdy nezapisuje do repozitáře.
 
-```bash
-npx eas-cli@latest device:create  # zaregistruje tvůj iPhone (otevři odkaz v iPhonu)
-npm run build:ios:preview         # EAS si vyžádá přihlášení k Apple účtu a vytvoří certifikáty
+**Jednou ruční kroky (vlastník účtů):**
+
+1. **Apple Developer Program** (99 USD/rok): https://developer.apple.com/programs/enroll/ (schválení obvykle 24–48 h, někdy déle).
+2. **App Store Connect API klíč:** https://appstoreconnect.apple.com → *Uživatelé a přístup* → *Integrace* → *App Store Connect API* → *Klíče týmu* → **+**.
+   - Role **Admin** (Expo ji potřebuje ke správě certifikátů).
+   - Stáhni `AuthKey_XXXX.p8`. **Jde stáhnout jen jednou.**
+   - Opiš si *Key ID* a *Issuer ID*.
+   - *Team ID* najdeš na https://developer.apple.com/account → *Membership details*.
+3. **Expo účet a token:**
+   - Registrace na https://expo.dev/signup.
+   - Token vytvoříš na https://expo.dev/settings/access-tokens → *Create token*.
+   - Token se zobrazí jen jednou. Nevkládej ho do chatu ani do souborů.
+4. **Záznam aplikace v App Store Connect** (až po prvním kroku `credentials`, který zaregistruje bundle ID):
+   - *Aplikace* → **+** → *Nová aplikace*, platforma iOS, bundle ID `app.wakeify`, libovolné SKU.
+   - Číselné Apple ID aplikace si skript zjistí sám.
+5. **iPhone:** nainstaluj aplikaci **TestFlight** z App Store, přihlas se stejným Apple ID. Jako vývojář účtu jsi automaticky interní tester.
+
+**Proměnné prostředí** (cloudové prostředí: *Edit* → *Environment variables*; lokálně `export …`):
+
+| Proměnná | Hodnota |
+|---|---|
+| `EXPO_TOKEN` | token z expo.dev |
+| `EXPO_ASC_KEY_ID` | Key ID |
+| `EXPO_ASC_ISSUER_ID` | Issuer ID |
+| `EXPO_APPLE_TEAM_ID` | Team ID |
+| `EXPO_APPLE_TEAM_TYPE` | `INDIVIDUAL` (nebo `COMPANY_OR_ORGANIZATION`) |
+| `EXPO_ASC_API_KEY_P8_BASE64` | obsah `.p8` v base64 na jednom řádku: macOS/Linux `base64 -i AuthKey_XXXX.p8 \| tr -d '\n'`, Windows PowerShell `[Convert]::ToBase64String([IO.File]::ReadAllBytes("AuthKey_XXXX.p8"))` |
+
+**Povolené domény** (jen pro cloudové prostředí; *Network access* → *Custom*, ponech výchozí balíčkové registry):
+
+```
+api.expo.dev
+expo.dev
+logs.expo.dev
+storage.googleapis.com
+api.appstoreconnect.apple.com
 ```
 
-1. Otevři v iPhonu odkaz z výstupu EAS a nainstaluj.
-2. Zapni **Nastavení → Soukromí a zabezpečení → Režim vývojáře**.
-3. Povol „Alarmy“ (AlarmKit) při prvním dotazu.
+**Spuštění:**
 
-EAS použije image `sdk-57` (Xcode 26.6), který podmínku Xcode ≥ 26.1 splňuje.
+```bash
+scripts/eas-ios-testflight.sh check        # ověří proměnné, síť a token; vytvoří EAS projekt
+scripts/eas-ios-testflight.sh credentials  # jen poprvé: certifikát + profil + API klíč pro odeslání (dotazy v terminálu)
+scripts/eas-ios-testflight.sh build        # build v cloudu Expo + odeslání do TestFlightu
+```
+
+Po zpracování v App Store Connect (zhruba 10–30 min) se build objeví v aplikaci TestFlight → *Instalovat*. Interní testování nevyžaduje schválení od Apple. Bezplatný plán Expo má omezený počet iOS buildů za měsíc a pomalejší frontu.
+
+> Pokud Apple odmítne bundle ID `app.wakeify` (už ho používá někdo jiný), změň `ios.bundleIdentifier` v `app.json` na vlastní, např. `cz.tvojejmeno.wakeify`.
 
 ### Lokálně bez EAS (alternativa)
 
