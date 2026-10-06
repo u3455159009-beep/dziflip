@@ -1,0 +1,3 @@
+# The Wakeify mobile app (Expo) lives in its own folder and is not part of
+# the Next.js deployment.
+wakeify/
