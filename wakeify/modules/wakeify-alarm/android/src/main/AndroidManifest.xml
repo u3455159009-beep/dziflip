@@ -1,0 +1,48 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+  <!-- Exact alarms. USE_EXACT_ALARM (API 33+) is granted at install for alarm-clock apps;
+       SCHEDULE_EXACT_ALARM covers API 31-32 (user-revocable). -->
+  <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+  <uses-permission
+    android:name="android.permission.SCHEDULE_EXACT_ALARM"
+    android:maxSdkVersion="32" />
+  <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+  <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+  <uses-permission android:name="android.permission.WAKE_LOCK" />
+  <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+  <uses-permission android:name="android.permission.VIBRATE" />
+  <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+  <application>
+    <!-- Internal receiver: FIRE / REPOST via our own explicit PendingIntents. -->
+    <receiver
+      android:name="app.wakeify.alarm.AlarmReceiver"
+      android:directBootAware="true"
+      android:exported="false" />
+
+    <!-- Exported only for system broadcasts; refuses FIRE / REPOST (see AlarmSystemReceiver). -->
+    <receiver
+      android:name="app.wakeify.alarm.AlarmSystemReceiver"
+      android:directBootAware="true"
+      android:exported="true">
+      <intent-filter>
+        <action android:name="android.intent.action.BOOT_COMPLETED" />
+        <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+        <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+        <action android:name="android.intent.action.TIME_SET" />
+        <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+        <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
+        <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+        <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
+      </intent-filter>
+    </receiver>
+
+    <service
+      android:name="app.wakeify.alarm.AlarmRingService"
+      android:directBootAware="true"
+      android:exported="false"
+      android:foregroundServiceType="mediaPlayback" />
+  </application>
+</manifest>

@@ -1,0 +1,9 @@
+{
+  "name": "wakeify-alarm",
+  "version": "1.0.0",
+  "description": "Wakeify native alarm engine (Android AlarmManager + foreground service, iOS AlarmKit)",
+  "main": "index.ts",
+  "license": "UNLICENSED",
+  "author": "Wakeify",
+  "homepage": "https://wakeify.app"
+}

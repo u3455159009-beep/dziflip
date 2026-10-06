@@ -1,0 +1,29 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'app.wakeify'
+version = '1.0.0'
+
+android {
+  namespace "app.wakeify.alarm"
+  defaultConfig {
+    versionCode 1
+    versionName "1.0.0"
+  }
+  testOptions {
+    unitTests.all {
+      useJUnitPlatform()
+    }
+  }
+}
+
+dependencies {
+  // JVM unit tests for the framework-only core (AlarmTimeCalculator, AlarmSpec JSON).
+  // org.json is stubbed in android.jar unit tests, so the real implementation is added.
+  testImplementation platform('org.junit:junit-bom:5.11.4')
+  testImplementation 'org.junit.jupiter:junit-jupiter'
+  testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+  testImplementation 'org.json:json:20240303'
+}
