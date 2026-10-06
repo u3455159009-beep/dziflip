@@ -92,6 +92,7 @@ export async function searchProductsForRequirement(requirementId: string): Promi
   const candidates: Awaited<ReturnType<typeof persistCandidate>>[] = [];
 
   for (const provider of active) {
+    const startedAt = Date.now();
     try {
       const results = await provider.search({
         category: requirement.category as ProductCategory,
@@ -101,12 +102,18 @@ export async function searchProductsForRequirement(requirementId: string): Promi
         referenceLocality: settings.shoppingReferenceLocality
       });
       providerNotes.push({ provider: provider.key, status: "ACTIVE" });
+      await prisma.providerSuccessLog
+        .create({ data: { provider: provider.key, resultCount: results.length, latencyMs: Date.now() - startedAt } })
+        .catch(() => {});
       for (const c of results) {
         candidates.push(await persistCandidate(requirementId, c));
       }
     } catch (err) {
       const note = err instanceof ProductNotAvailableError ? err.message : "Vyhledávání produktů selhalo.";
       providerNotes.push({ provider: provider.key, status: "ERROR", note });
+      await prisma.providerErrorLog
+        .create({ data: { provider: provider.key, errorMessage: note, latencyMs: Date.now() - startedAt } })
+        .catch(() => {});
     }
   }
 

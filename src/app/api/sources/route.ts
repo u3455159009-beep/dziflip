@@ -1,44 +1,28 @@
-// Provider Health (item 16) — a provider's status alone doesn't tell the
-// user whether it's actually working. This computes real, queryable
-// evidence (last successful discovery, how many real listings/comparables
-// it has actually produced, its most recent logged error) straight from
-// the database — never a fabricated "looks fine" indicator.
+// Provider Health (Request E, item 6) — a provider's status alone doesn't
+// tell the user whether it's actually working. This computes real,
+// queryable evidence (last successful call, result count, latency, rate
+// limits, auth/billing problems, most recent logged error) straight from
+// the database via the shared CONNECTED/DEGRADED/UNVERIFIED/PENDING_ACCESS/
+// UNAVAILABLE/ERROR state machine (src/lib/providerHealth.ts) — never a
+// fabricated "looks fine" indicator, and never CONNECTED purely because an
+// env var exists.
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { SOURCE_PROVIDERS } from "@/lib/sources/registry";
 import { getFlatScanMonthlyRequestCount } from "@/lib/sources/flatScan/client";
-
-export type ProviderHealthStatus = "CONNECTED" | "PENDING_ACCESS" | "ERROR" | "DISABLED" | "UNVERIFIED";
+import { buildProviderHealthSummary, type ProviderHealthStatus } from "@/lib/providerHealth";
 
 const FLATSCAN_MONTHLY_BUDGET = 1000;
 
 export async function GET() {
   const providers = await Promise.all(
     SOURCE_PROVIDERS.map(async (p) => {
-      // `status` (ACTIVE | PENDING_ACCESS) is the original field consumed by
-      // WatcherForm's "which sources can this watcher use" checklist — kept
-      // unchanged so that UI keeps working. `healthStatus` below is the
-      // richer, additive Provider Health diagnostic (item 16).
-      if (p.status === "PENDING_ACCESS") {
-        return {
-          key: p.key,
-          label: p.label,
-          status: p.status,
-          statusNote: p.statusNote ?? null,
-          healthStatus: "PENDING_ACCESS" as ProviderHealthStatus,
-          lastSuccessAt: null as string | null,
-          totalFound: 0,
-          lastError: null as { message: string; occurredAt: string } | null,
-          monthlyRequestCount: null as number | null,
-          monthlyRequestBudget: null as number | null
-        };
-      }
+      const configured = p.status === "ACTIVE";
 
       // FlatScan keeps its own precise request log (FlatScanRequestLog) —
       // a cache hit never adds a row there, so it's the honest source of
-      // truth for "last successful request/error" and the monthly call
-      // budget, distinct from the generic Comparable/Project-based
-      // inference every other provider is judged by below.
+      // truth for this provider specifically, distinct from the generic
+      // ProviderSuccessLog/ProviderErrorLog every other provider uses.
       if (p.key === "FLATSCAN") {
         const [lastOk, lastErr, comparableCount, monthlyRequestCount] = await Promise.all([
           prisma.flatScanRequestLog.findFirst({ where: { ok: true }, orderBy: { requestedAt: "desc" } }),
@@ -46,61 +30,62 @@ export async function GET() {
           prisma.comparable.count({ where: { sourceProvider: "FLATSCAN" } }),
           getFlatScanMonthlyRequestCount()
         ]);
-        const healthStatus: ProviderHealthStatus =
-          !lastOk && !lastErr
-            ? "UNVERIFIED"
-            : lastErr && (!lastOk || lastErr.requestedAt > lastOk.requestedAt)
-              ? "ERROR"
-              : "CONNECTED";
+        const health = buildProviderHealthSummary({
+          configured,
+          lastSuccess: lastOk ? { occurredAt: lastOk.requestedAt, resultCount: comparableCount, latencyMs: null } : null,
+          lastError: lastErr ? { occurredAt: lastErr.requestedAt, errorMessage: lastErr.errorMessage ?? `HTTP ${lastErr.statusCode ?? "?"}`, latencyMs: null } : null,
+          anyErrorEverRateLimited: false
+        });
         return {
           key: p.key,
           label: p.label,
           status: p.status,
           statusNote: p.statusNote ?? null,
-          healthStatus,
-          lastSuccessAt: lastOk ? lastOk.requestedAt.toISOString() : null,
+          healthStatus: health.healthStatus as ProviderHealthStatus,
+          lastSuccessAt: health.lastSuccessAt,
           totalFound: comparableCount,
-          lastError: lastErr ? { message: lastErr.errorMessage ?? `HTTP ${lastErr.statusCode ?? "?"}`, occurredAt: lastErr.requestedAt.toISOString() } : null,
+          lastError: health.lastError,
+          lastSuccessLatencyMs: health.lastSuccessLatencyMs,
+          lastErrorLatencyMs: health.lastErrorLatencyMs,
+          rateLimitEncountered: health.rateLimitEncountered,
+          keyOrBillingRequired: health.keyOrBillingRequired,
           monthlyRequestCount,
           monthlyRequestBudget: FLATSCAN_MONTHLY_BUDGET
         };
       }
 
-      const [lastComparable, lastListing, comparableCount, listingCount, lastErrorLog] = await Promise.all([
-        prisma.comparable.findFirst({ where: { sourceProvider: p.key }, orderBy: { lastSeenAt: "desc" } }),
-        prisma.project.findFirst({ where: { portal: p.label, sourceWatcherId: { not: null } }, orderBy: { lastSeenAt: "desc" } }),
+      const [lastSuccessLog, lastErrorLog, anyRateLimitedError, comparableCount, listingCount] = await Promise.all([
+        prisma.providerSuccessLog.findFirst({ where: { provider: p.key }, orderBy: { occurredAt: "desc" } }),
+        prisma.providerErrorLog.findFirst({ where: { provider: p.key }, orderBy: { occurredAt: "desc" } }),
+        prisma.providerErrorLog.findFirst({ where: { provider: p.key, errorMessage: { contains: "rate limit" } } }),
         prisma.comparable.count({ where: { sourceProvider: p.key } }),
-        prisma.project.count({ where: { portal: p.label, sourceWatcherId: { not: null } } }),
-        prisma.providerErrorLog.findFirst({ where: { provider: p.key }, orderBy: { occurredAt: "desc" } })
+        prisma.project.count({ where: { portal: p.label, sourceWatcherId: { not: null } } })
       ]);
 
-      const lastSuccessAt = [lastComparable?.lastSeenAt, lastListing?.lastSeenAt]
-        .filter((d): d is Date => d != null)
-        .sort((a, b) => b.getTime() - a.getTime())[0];
-
-      const totalFound = comparableCount + listingCount;
-
-      // An ACTIVE provider that has logged an error more recently than its
-      // last real success is reporting trouble, not silently "fine" — and a
-      // key being configured with neither a real success nor a real error
-      // yet recorded is UNVERIFIED, never claimed CONNECTED on the strength
-      // of its existence alone.
-      const healthStatus: ProviderHealthStatus =
-        !lastSuccessAt && !lastErrorLog
-          ? "UNVERIFIED"
-          : lastErrorLog && (!lastSuccessAt || lastErrorLog.occurredAt > lastSuccessAt)
-            ? "ERROR"
-            : "CONNECTED";
+      const health = buildProviderHealthSummary({
+        configured,
+        lastSuccess: lastSuccessLog
+          ? { occurredAt: lastSuccessLog.occurredAt, resultCount: lastSuccessLog.resultCount, latencyMs: lastSuccessLog.latencyMs }
+          : null,
+        lastError: lastErrorLog
+          ? { occurredAt: lastErrorLog.occurredAt, errorMessage: lastErrorLog.errorMessage, latencyMs: lastErrorLog.latencyMs }
+          : null,
+        anyErrorEverRateLimited: Boolean(anyRateLimitedError)
+      });
 
       return {
         key: p.key,
         label: p.label,
         status: p.status,
         statusNote: p.statusNote ?? null,
-        healthStatus,
-        lastSuccessAt: lastSuccessAt ? lastSuccessAt.toISOString() : null,
-        totalFound,
-        lastError: lastErrorLog ? { message: lastErrorLog.errorMessage, occurredAt: lastErrorLog.occurredAt.toISOString() } : null,
+        healthStatus: health.healthStatus as ProviderHealthStatus,
+        lastSuccessAt: health.lastSuccessAt,
+        totalFound: comparableCount + listingCount,
+        lastError: health.lastError,
+        lastSuccessLatencyMs: health.lastSuccessLatencyMs,
+        lastErrorLatencyMs: health.lastErrorLatencyMs,
+        rateLimitEncountered: health.rateLimitEncountered,
+        keyOrBillingRequired: health.keyOrBillingRequired,
         monthlyRequestCount: null as number | null,
         monthlyRequestBudget: null as number | null
       };

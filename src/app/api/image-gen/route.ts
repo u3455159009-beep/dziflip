@@ -1,47 +1,38 @@
-// Provider Health for the image-generation/visualization pipeline (item
-// 15 of the Gemini phase; item 5 of the production-fix phase). Real,
-// verified status only: PENDING_ACCESS when no key, UNVERIFIED when a key
-// is configured but no real request has ever succeeded or failed,
-// otherwise CONNECTED/ERROR from whichever real attempt (success or
-// logged failure) is most recent. A configured key alone is NEVER reported
-// as CONNECTED — that claim requires at least one real, observed outcome
-// (real usage, or the on-demand smoke test at POST .../smoke-test).
+// Provider Health for the image-generation/visualization pipeline (Request
+// E, item 6). Real, verified status only via the shared
+// CONNECTED/DEGRADED/UNVERIFIED/PENDING_ACCESS/UNAVAILABLE/ERROR state
+// machine (src/lib/providerHealth.ts) — a configured key alone is NEVER
+// reported as CONNECTED; that claim requires at least one real, observed
+// outcome (real usage, or the on-demand smoke test at POST .../smoke-test).
 // lastError only ever carries the sanitized message already produced by
 // the provider — never the API key.
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { IMAGE_GEN_PROVIDERS } from "@/lib/imageGen/registry";
-import { deriveImageGenHealthStatus, type ImageGenHealthStatus } from "@/lib/imageGen/health";
+import { buildProviderHealthSummary, type ProviderHealthStatus } from "@/lib/providerHealth";
 
 export async function GET() {
   const providers = await Promise.all(
     IMAGE_GEN_PROVIDERS.map(async (p) => {
-      if (p.status === "PENDING_ACCESS") {
-        return {
-          key: p.key,
-          label: p.label,
-          status: p.status,
-          statusNote: p.statusNote ?? null,
-          healthStatus: "PENDING_ACCESS" as ImageGenHealthStatus,
-          lastSuccessAt: null as string | null,
-          totalGenerated: 0,
-          lastError: null as { message: string; occurredAt: string } | null,
-          lastFailureCode: null as string | null
-        };
-      }
+      const configured = p.status !== "PENDING_ACCESS";
 
-      const [lastSuccess, totalGenerated, lastErrorLog, lastFailedGeneration] = await Promise.all([
-        prisma.photoGeneration.findFirst({ where: { provider: p.key, status: "GENERATED" }, orderBy: { generatedAt: "desc" } }),
+      const [lastSuccessLog, totalGenerated, lastErrorLog, anyRateLimitedError, lastFailedGeneration] = await Promise.all([
+        prisma.providerSuccessLog.findFirst({ where: { provider: p.key }, orderBy: { occurredAt: "desc" } }),
         prisma.photoGeneration.count({ where: { provider: p.key, status: "GENERATED" } }),
         prisma.providerErrorLog.findFirst({ where: { provider: p.key }, orderBy: { occurredAt: "desc" } }),
+        prisma.providerErrorLog.findFirst({ where: { provider: p.key, errorMessage: { contains: "RATE_LIMITED" } } }),
         prisma.photoGeneration.findFirst({ where: { provider: p.key, status: "FAILED" }, orderBy: { createdAt: "desc" } })
       ]);
 
-      const lastSuccessAt = lastSuccess?.generatedAt ?? null;
-      const healthStatus = deriveImageGenHealthStatus({
-        configured: true,
-        lastSuccessAt,
-        lastErrorAt: lastErrorLog?.occurredAt ?? null
+      const health = buildProviderHealthSummary({
+        configured,
+        lastSuccess: lastSuccessLog
+          ? { occurredAt: lastSuccessLog.occurredAt, resultCount: lastSuccessLog.resultCount, latencyMs: lastSuccessLog.latencyMs }
+          : null,
+        lastError: lastErrorLog
+          ? { occurredAt: lastErrorLog.occurredAt, errorMessage: lastErrorLog.errorMessage, latencyMs: lastErrorLog.latencyMs }
+          : null,
+        anyErrorEverRateLimited: Boolean(anyRateLimitedError)
       });
 
       return {
@@ -49,10 +40,14 @@ export async function GET() {
         label: p.label,
         status: p.status,
         statusNote: p.statusNote ?? null,
-        healthStatus,
-        lastSuccessAt: lastSuccessAt ? lastSuccessAt.toISOString() : null,
+        healthStatus: health.healthStatus as ProviderHealthStatus,
+        lastSuccessAt: health.lastSuccessAt,
         totalGenerated,
-        lastError: lastErrorLog ? { message: lastErrorLog.errorMessage, occurredAt: lastErrorLog.occurredAt.toISOString() } : null,
+        lastError: health.lastError,
+        lastSuccessLatencyMs: health.lastSuccessLatencyMs,
+        lastErrorLatencyMs: health.lastErrorLatencyMs,
+        rateLimitEncountered: health.rateLimitEncountered,
+        keyOrBillingRequired: health.keyOrBillingRequired,
         lastFailureCode: lastFailedGeneration?.failureCode ?? null
       };
     })

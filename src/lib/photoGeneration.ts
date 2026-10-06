@@ -115,8 +115,8 @@ function toRoomAnalysis(photo: {
   };
 }
 
-async function logProviderFailure(providerKey: string, message: string) {
-  await prisma.providerErrorLog.create({ data: { provider: providerKey, errorMessage: message } }).catch(() => {});
+async function logProviderFailure(providerKey: string, message: string, latencyMs?: number) {
+  await prisma.providerErrorLog.create({ data: { provider: providerKey, errorMessage: message, latencyMs: latencyMs ?? null } }).catch(() => {});
 }
 
 export async function requestPhotoGeneration(photoId: string, style: PhotoGenerationStyle, prompt: string | null) {
@@ -150,8 +150,10 @@ export async function requestPhotoGeneration(photoId: string, style: PhotoGenera
   const pending = await prisma.photoGeneration.create({
     data: { photoId, style, prompt, status: "PENDING", renovationPlanId, provider: provider.key, requestSignature: signature }
   });
+  const startedAt = Date.now();
   try {
     const result = await provider.generate({ photoUrl: photo.url, style, prompt, roomType, planContext, roomAnalysis });
+    await prisma.providerSuccessLog.create({ data: { provider: provider.key, resultCount: 1, latencyMs: Date.now() - startedAt } }).catch(() => {});
     // A successful Gemini call whose image can't be durably saved is not a
     // successful generation (item 7) — this throws BlobSaveError, caught
     // below like any other failure, before any GENERATED row is written.
@@ -189,7 +191,7 @@ export async function requestPhotoGeneration(photoId: string, style: PhotoGenera
     // save — is never reported as an undifferentiated generic error.
     const message = err instanceof Error ? err.message : "Vizualizaci se nepodařilo vygenerovat.";
     const code = typeof (err as any)?.code === "string" ? (err as any).code : "GEMINI_RESPONSE_INVALID";
-    await logProviderFailure(provider.key, message);
+    await logProviderFailure(provider.key, message, Date.now() - startedAt);
     return prisma.photoGeneration.update({
       where: { id: pending.id },
       data: { status: "FAILED", failureReason: message, failureCode: code }

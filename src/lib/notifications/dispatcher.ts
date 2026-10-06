@@ -31,7 +31,7 @@ export async function dispatchAlert(payload: AlertNotificationPayload) {
       }
     });
   }
-  // PUSH and SMS providers exist (see providers.ts) but have no Settings
-  // toggle yet since neither can actually deliver anything until a real
-  // channel is implemented — see README for what's needed to wire them up.
+  // PUSH, SMS, TELEGRAM and WHATSAPP providers exist (see providers.ts, for
+  // Provider Health visibility) but have no Settings toggle yet since none
+  // can actually deliver anything until a real channel is connected.
 }

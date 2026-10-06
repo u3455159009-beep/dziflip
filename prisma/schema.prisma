@@ -200,6 +200,26 @@ model Project {
   sourceWatcher   Watcher? @relation(fields: [sourceWatcherId], references: [id], onDelete: SetNull)
   analysisStage   String   @default("FULL_ANALYSIS") // FOUND | BASIC_ANALYSIS | COMPARABLES | PHOTO_ANALYSIS | FULL_ANALYSIS
 
+  // Watchdog V2 — same-property-on-another-portal (item 2): when a watcher
+  // run finds a listing that scoreDuplicateMatch classifies SAME_PROPERTY
+  // against this one, it's recorded here rather than becoming a second
+  // Project (and a second "new opportunity" alert). JSON array of
+  // { portal, url, externalId, firstSeenAt }. The ORIGINAL portal/sourceUrl
+  // above stays the system of record for pricing; this is additional
+  // evidence only.
+  crossPortalListings String?
+
+  // Watchdog V2 — listing availability tracking (item 2): independent of
+  // the user's own flip-stage `status` above (BOUGHT/SOLD stay BOUGHT/SOLD
+  // even after the portal naturally delists them). LISTED | REMOVED |
+  // RELISTED. listingMissedRuns requires 2 consecutive watcher runs that
+  // don't see this externalId before declaring REMOVED, so one transient
+  // provider hiccup never falsely claims a listing vanished.
+  listingAvailability String    @default("LISTED")
+  listingMissedRuns    Int       @default(0)
+  listingRemovedAt     DateTime?
+  listingRelistedAt    DateTime?
+
   photos              Photo[]
   comparables         Comparable[]
   budgetItems         BudgetItem[]
@@ -311,12 +331,21 @@ model Alert {
   watcherId String?
   watcher   Watcher? @relation(fields: [watcherId], references: [id], onDelete: SetNull)
 
-  reason         String // NEW_MATCH | PRICE_DROP
+  reason         String // NEW_MATCH | PRICE_DROP | LISTING_REMOVED | LISTING_RELISTED
   band           String?
   askingPrice    Float?
   pricePerM2     Float?
   expectedProfit Float?
   roiPct         Float?
+
+  // Request E, item 3 — carried on the Alert itself (not just the
+  // ephemeral notification payload) so the Alerts inbox can redisplay the
+  // exact same figures later. Every one of these is null/absent — never a
+  // guessed number — whenever the underlying calc genuinely couldn't run.
+  marketValueEstimate Float?
+  arvEstimate         Float?
+  renovationEstimate  Float?
+  dziflipScore        Int? // 0-100, see src/lib/dziflipScore.ts; null when confidence is too low to score honestly
 
   createdAt DateTime  @default(now())
   readAt    DateTime?
@@ -834,6 +863,18 @@ model ProductPriceHistory {
   recordedAt   DateTime @default(now())
 }
 
+// Provider Health (item 6) — the success-side counterpart to
+// ProviderErrorLog below. Written at the same call sites, so "last
+// successful request / result count / latency" are real, observed
+// numbers, never inferred from an env var merely existing.
+model ProviderSuccessLog {
+  id          String   @id @default(cuid())
+  provider    String
+  resultCount Int?
+  latencyMs   Int?
+  occurredAt  DateTime @default(now())
+}
+
 // Provider/pipeline error isolation (item 22) — one bad listing or provider
 // must never take down the whole Deal Radar run.
 model ProviderErrorLog {
@@ -842,6 +883,7 @@ model ProviderErrorLog {
   watcherId    String?
   externalId   String?
   errorMessage String
+  latencyMs    Int?
   retryStatus  String   @default("NONE") // NONE | RETRIED | GAVE_UP
   occurredAt   DateTime @default(now())
 }

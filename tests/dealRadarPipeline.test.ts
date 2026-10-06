@@ -116,7 +116,7 @@ describe("Deal Radar V2 — full pipeline (DEMO fixtures)", () => {
     } as const;
 
     await expect(
-      processListingItem({ item: badItem as any, providerKey: "MOCK_DEMO", watcher, settings, summary: { providers: [], newProjects: 0, updatedProjects: 0, priceDrops: 0, alerts: 0, itemErrors: 0 } })
+      processListingItem({ item: badItem as any, providerKey: "MOCK_DEMO", watcher, settings, summary: { providers: [], newProjects: 0, updatedProjects: 0, priceDrops: 0, crossPortalDuplicates: 0, listingsRemoved: 0, listingsRelisted: 0, alerts: 0, itemErrors: 0 } })
     ).rejects.toThrow();
 
     // A good item processed independently must still succeed — one
@@ -126,7 +126,7 @@ describe("Deal Radar V2 — full pipeline (DEMO fixtures)", () => {
       providerKey: "MOCK_DEMO",
       watcher,
       settings,
-      summary: { providers: [], newProjects: 0, updatedProjects: 0, priceDrops: 0, alerts: 0, itemErrors: 0 }
+      summary: { providers: [], newProjects: 0, updatedProjects: 0, priceDrops: 0, crossPortalDuplicates: 0, listingsRemoved: 0, listingsRelisted: 0, alerts: 0, itemErrors: 0 }
     });
 
     const created = await prisma.project.findUnique({ where: { portal_externalId: { portal: "DEMO", externalId: "isolation-good-1" } } });

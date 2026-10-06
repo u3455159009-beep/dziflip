@@ -5,6 +5,7 @@
 import { prisma } from "@/lib/prisma";
 import { getSettings } from "@/lib/settings";
 import { computeDataConfidence } from "@/lib/confidence";
+import { isSmtpConfigured, sendEmail } from "@/lib/email/smtpClient";
 import type { DataConfidenceLevel, FieldMeta } from "@/lib/types";
 
 export const DEFAULT_TEMPLATE_BODY = `Dobrý den,
@@ -25,7 +26,7 @@ function renderTemplate(body: string, vars: Record<string, string>): string {
 }
 
 function emailConfigured(): boolean {
-  return Boolean(process.env.SMTP_HOST && process.env.SMTP_FROM);
+  return isSmtpConfigured();
 }
 
 interface DedupCheckResult {
@@ -71,9 +72,9 @@ async function attemptEmailSend(to: string, subject: string, body: string): Prom
       reason: "E-mail nebyl odeslán — SMTP není nakonfigurováno (chybí SMTP_HOST/SMTP_FROM v .env)."
     };
   }
-  // Real SMTP dispatch is a follow-up step once credentials exist — never
-  // fabricate a SENT status before that client is wired in.
-  return { status: "FAILED", reason: "SMTP klient zatím není implementován." };
+  const result = await sendEmail({ to, subject, text: body });
+  if (result.status === "SENT") return { status: "SENT" };
+  return { status: "FAILED", reason: result.detail ?? "E-mail se nepodařilo odeslat." };
 }
 
 async function buildMessageBody(projectId: string) {

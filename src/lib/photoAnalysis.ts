@@ -27,7 +27,16 @@ export async function analyzePhotoWithAi(photoId: string) {
   const photo = await prisma.photo.findUnique({ where: { id: photoId } });
   if (!photo) throw new Error("Fotografie nenalezena.");
 
-  const result = await provider.analyzePhoto(photo.url);
+  const startedAt = Date.now();
+  let result;
+  try {
+    result = await provider.analyzePhoto(photo.url);
+    await prisma.providerSuccessLog.create({ data: { provider: provider.key, resultCount: 1, latencyMs: Date.now() - startedAt } }).catch(() => {});
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Analýza fotografie selhala.";
+    await prisma.providerErrorLog.create({ data: { provider: provider.key, errorMessage: message, latencyMs: Date.now() - startedAt } }).catch(() => {});
+    throw err;
+  }
 
   return prisma.photo.update({
     where: { id: photoId },
